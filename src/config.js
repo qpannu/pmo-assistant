@@ -36,6 +36,22 @@ export function loadConfig() {
     // when explicitly enabled — it is billed per call.
     priorityUseClaude: str('PRIORITY_USE_CLAUDE', 'false') === 'true',
     claudeModel: str('CLAUDE_MODEL', 'claude-opus-5-5'),
+    // Briefings, questions and drafts. Off by default (billed per call).
+    claudeEnabled: str('CLAUDE_ENABLED', 'false') === 'true',
+    claudeDailyCallLimit: int('CLAUDE_DAILY_CALL_LIMIT', 40, { min: 0, max: 1000 }),
+    // Optional text file about your projects/team, sent (and cached) with each Claude call.
+    pmoContextFile: str('PMO_CONTEXT_FILE'),
+    myName: str('MY_NAME'),
+
+    // Notifications to you in Teams via a Teams Workflow webhook (secret URL).
+    teamsWebhookUrl: str('TEAMS_WEBHOOK_URL'),
+    briefingTimes: Object.freeze({
+      morning: str('BRIEFING_MORNING', '08:00'),
+      midday: str('BRIEFING_MIDDAY', '12:30'),
+      eod: str('BRIEFING_EOD', '17:30'),
+    }),
+    // Days of week (0 = Sunday): weekdays by default.
+    briefingDays: Object.freeze(list('BRIEFING_DAYS', ['1', '2', '3', '4', '5']).map(Number)),
 
     jira: Object.freeze({
       baseUrl: str('JIRA_BASE_URL').replace(/\/+$/, ''),

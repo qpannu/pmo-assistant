@@ -4,11 +4,12 @@ import { logger } from './logger.js';
 import { sourceRoutes } from './routes/sources.js';
 import { actionRoutes } from './routes/actions.js';
 import { priorityRoutes } from './routes/priorities.js';
+import { assistantRoutes } from './routes/assistant.js';
 import { jiraOverview } from './jira/sync.js';
 import { outlookOverview } from './outlook/sync.js';
 import { teamsOverview } from './teams/sync.js';
 
-export function createApp(config, { db, store, scheduler, reasoner = null } = {}) {
+export function createApp(config, { db, store, scheduler, reasoner = null, notifier = null, claude = null, briefings = null } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
@@ -54,6 +55,9 @@ export function createApp(config, { db, store, scheduler, reasoner = null } = {}
     }));
     app.use('/actions', actionRoutes({ store }));
     app.use('/', priorityRoutes({ store, reasoner }));
+    if (notifier && claude && briefings) {
+      app.use('/', assistantRoutes({ store, config, scheduler, notifier, claude, briefings }));
+    }
   }
 
   app.use((req, res) => res.status(404).json({ error: 'Not found' }));

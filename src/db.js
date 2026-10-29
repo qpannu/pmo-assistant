@@ -135,6 +135,42 @@ const MIGRATIONS = [
   ALTER TABLE action_items ADD COLUMN ranked_at TEXT;
   ALTER TABLE alerts ADD COLUMN action_item_id INTEGER REFERENCES action_items(id) ON DELETE SET NULL;
   `,
+
+  // 4 — notifications, briefings, Claude usage
+  `
+  ALTER TABLE alerts ADD COLUMN notified_at TEXT;
+  ALTER TABLE alerts ADD COLUMN notify_attempts INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE alerts ADD COLUMN notify_error TEXT;
+
+  -- One briefing per kind per day; input_hash lets unchanged updates skip Claude.
+  CREATE TABLE briefings (
+    id         INTEGER PRIMARY KEY,
+    kind       TEXT NOT NULL CHECK (kind IN ('morning','midday','eod')),
+    day        TEXT NOT NULL,
+    method     TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    sent_at    TEXT,
+    send_error TEXT,
+    UNIQUE (kind, day)
+  );
+
+  CREATE TABLE llm_calls (
+    id                 INTEGER PRIMARY KEY,
+    purpose            TEXT NOT NULL,
+    model              TEXT,
+    input_tokens       INTEGER,
+    output_tokens      INTEGER,
+    cache_read_tokens  INTEGER,
+    cache_write_tokens INTEGER,
+    ms                 INTEGER,
+    ok                 INTEGER NOT NULL,
+    error              TEXT,
+    created_at         TEXT NOT NULL
+  );
+  CREATE INDEX llm_calls_created ON llm_calls (created_at);
+  `,
 ];
 
 export function openDb(path) {

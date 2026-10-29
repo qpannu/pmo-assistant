@@ -2,7 +2,8 @@
 // Values under secret-looking keys are always redacted.
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
-const SECRET_KEY = /token|secret|password|passwd|api[_-]?key|authorization|cookie|credential/i;
+// Matches apiToken / accessToken / token, but not counters like inputTokens.
+const SECRET_KEY = /token$|secret|password|passwd|api[_-]?key|authorization|cookie|credential|webhook/i;
 
 let threshold = LEVELS[process.env.LOG_LEVEL] ?? LEVELS.info;
 

@@ -240,6 +240,81 @@ export function createStore(db) {
     return stmt(`UPDATE alerts SET acknowledged_at = ? WHERE id = ? AND acknowledged_at IS NULL`).run(now(), id).changes === 1;
   }
 
+  // Alerts not yet delivered to Teams (gives up after maxAttempts).
+  function alertsToNotify(maxAttempts = 5) {
+    return stmt(`SELECT * FROM alerts WHERE acknowledged_at IS NULL AND notified_at IS NULL AND notify_attempts < ?
+      ORDER BY created_at`).all(maxAttempts);
+  }
+
+  function markAlertNotified(id) {
+    stmt(`UPDATE alerts SET notified_at = ?, notify_error = NULL, notify_attempts = notify_attempts + 1 WHERE id = ?`).run(now(), id);
+  }
+
+  function markAlertNotifyFailed(id, error) {
+    stmt(`UPDATE alerts SET notify_error = ?, notify_attempts = notify_attempts + 1 WHERE id = ?`).run(String(error).slice(0, 500), id);
+  }
+
+  // ─── Briefings ─────────────────────────────────────────────────────────────
+  function getBriefing(kind, day) {
+    return stmt(`SELECT * FROM briefings WHERE kind = ? AND day = ?`).get(kind, day) ?? null;
+  }
+
+  function latestBriefingOn(day) {
+    return stmt(`SELECT * FROM briefings WHERE day = ? ORDER BY created_at DESC LIMIT 1`).get(day) ?? null;
+  }
+
+  function lastSentBriefing() {
+    return stmt(`SELECT * FROM briefings WHERE sent_at IS NOT NULL ORDER BY sent_at DESC LIMIT 1`).get() ?? null;
+  }
+
+  // Creates the day's briefing, or replaces its content if it was never sent.
+  function saveBriefing({ kind, day, method, inputHash, content }) {
+    const existing = getBriefing(kind, day);
+    if (existing?.sent_at) return existing;
+    if (existing) {
+      stmt(`UPDATE briefings SET method = ?, input_hash = ?, content = ?, created_at = ?, send_error = NULL WHERE id = ?`)
+        .run(method, inputHash, content, now(), existing.id);
+    } else {
+      stmt(`INSERT INTO briefings (kind, day, method, input_hash, content, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(kind, day, method, inputHash, content, now());
+    }
+    return getBriefing(kind, day);
+  }
+
+  function markBriefingSent(id) {
+    stmt(`UPDATE briefings SET sent_at = ?, send_error = NULL WHERE id = ?`).run(now(), id);
+  }
+
+  function markBriefingFailed(id, error) {
+    stmt(`UPDATE briefings SET send_error = ? WHERE id = ?`).run(String(error).slice(0, 500), id);
+  }
+
+  function listBriefings(day) {
+    return stmt(`SELECT * FROM briefings WHERE day = ? ORDER BY created_at`).all(day);
+  }
+
+  // ─── Claude usage ──────────────────────────────────────────────────────────
+  function recordLlmCall({ purpose, model = null, usage = {}, ms = null, ok, error = null }) {
+    stmt(`INSERT INTO llm_calls (purpose, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, ms, ok, error, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(purpose, model, usage.input_tokens ?? null, usage.output_tokens ?? null, usage.cache_read_input_tokens ?? null,
+        usage.cache_creation_input_tokens ?? null, ms, ok ? 1 : 0, error ? String(error).slice(0, 500) : null, now());
+  }
+
+  function llmUsageSince(since) {
+    return stmt(`SELECT COUNT(*) AS calls, SUM(ok = 0) AS failures,
+        COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens,
+        COALESCE(SUM(cache_read_tokens), 0) AS cacheReadTokens, COALESCE(SUM(cache_write_tokens), 0) AS cacheWriteTokens
+      FROM llm_calls WHERE created_at >= ?`).get(since);
+  }
+
+  // Action-item lifecycle events since a time (for "what changed" briefings).
+  function actionEventsSince(since) {
+    return stmt(`SELECT h.event, h.detail, h.created_at, a.id, a.title, a.type, a.category, a.score, a.status, a.closed_reason
+      FROM history h JOIN action_items a ON a.id = h.entity_id
+      WHERE h.entity_type = 'action_item' AND h.created_at >= ? ORDER BY h.created_at`).all(since);
+  }
+
   function listActiveAlerts() {
     return stmt(`SELECT * FROM alerts WHERE acknowledged_at IS NULL
       ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, created_at DESC`).all();
@@ -307,7 +382,9 @@ export function createStore(db) {
     upsertActionItem, setActionStatus, getActionItem, listOpenActions,
     linkActionSource, unlinkActionSource, actionsForItem, listActionSources, listActionSourceItems,
     countActionSources, saveActionRanking,
-    raiseAlert, acknowledgeAlert, listActiveAlerts,
+    raiseAlert, acknowledgeAlert, listActiveAlerts, alertsToNotify, markAlertNotified, markAlertNotifyFailed,
+    getBriefing, latestBriefingOn, lastSentBriefing, saveBriefing, markBriefingSent, markBriefingFailed, listBriefings,
+    recordLlmCall, llmUsageSince, actionEventsSince,
     createDraft, getDraft, listDrafts, editDraft, approveDraft, rejectDraft,
     claimDraftForSend, markDraftSent, markDraftFailed,
   };

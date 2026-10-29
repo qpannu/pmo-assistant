@@ -13,6 +13,12 @@ import { syncTeams } from './teams/sync.js';
 import { syncActions } from './actions.js';
 import { runPriorityEngine } from './priority/engine.js';
 import { createClaudeReasoner } from './priority/reason.js';
+import { readFileSync } from 'node:fs';
+import { createClaude } from './claude/client.js';
+import { createTeamsNotifier, notifyPendingAlerts } from './notify/teams.js';
+import { createBriefingService } from './briefing/briefing.js';
+import { startBriefingSchedule } from './briefing/schedule.js';
+import { checkAndAlert } from './monitor.js';
 
 setLogLevel(config.logLevel);
 
@@ -22,21 +28,41 @@ const store = createStore(db);
 const scheduler = createScheduler();
 const integrations = integrationStatus(config);
 
-// Claude only reasons about the top three, only when enabled, and only when
-// the top candidates changed since the last call.
-const reasoner = config.priorityUseClaude && config.anthropicApiKey
-  ? createClaudeReasoner({ store, apiKey: config.anthropicApiKey, model: config.claudeModel })
-  : null;
-if (config.priorityUseClaude && !config.anthropicApiKey) logger.warn('PRIORITY_USE_CLAUDE is on but ANTHROPIC_API_KEY is empty; using rules only');
+// ─── Claude (optional) and Teams notifications ───────────────────────────────
+const pmoContext = config.pmoContextFile ? readPmoContext(config.pmoContextFile) : '';
+const claude = createClaude({
+  store,
+  apiKey: config.anthropicApiKey,
+  model: config.claudeModel,
+  enabled: config.claudeEnabled,
+  dailyCallLimit: config.claudeDailyCallLimit,
+  pmoContext,
+});
+if (config.claudeEnabled && !config.anthropicApiKey) logger.warn('CLAUDE_ENABLED is on but ANTHROPIC_API_KEY is empty; using rule-based text');
+const reasoner = config.priorityUseClaude && claude.enabled ? createClaudeReasoner({ store, claude }) : null;
 
-// Every sync is followed by turning changed items into action items and
-// re-ranking. Critical alerts are deduplicated, so re-runs don't repeat them.
+const notifier = createTeamsNotifier({ webhookUrl: config.teamsWebhookUrl });
+if (!notifier.configured) logger.warn('TEAMS_WEBHOOK_URL not set: briefings and alerts are logged, not sent (dry run)');
+const briefings = createBriefingService({ store, claude, notifier });
+
+// Every sync is followed by turning changed items into action items,
+// re-ranking, and delivering any new urgent alerts (each only once).
 const thenActions = (sync) => async () => {
   const result = await sync();
   const actions = syncActions(store);
   const { counts, newAlerts } = await runPriorityEngine(store, { reasoner, raiseAlerts: true });
-  return { ...result, actions, priorities: counts, newAlerts: newAlerts.length };
+  const notified = await notifyPendingAlerts(store, notifier);
+  return { ...result, actions, priorities: counts, newAlerts: newAlerts.length, notified: notified.length };
 };
+
+function readPmoContext(path) {
+  try {
+    return readFileSync(path, 'utf8').slice(0, 40_000);
+  } catch (err) {
+    logger.warn('PMO_CONTEXT_FILE unreadable; continuing without it', { error: err.message });
+    return '';
+  }
+}
 
 if (integrations.jira) {
   const client = createJiraClient(config.jira);
@@ -68,6 +94,13 @@ if (integrations.microsoft) {
 // Items stored before action derivation existed (or changed while offline).
 syncActions(store);
 
+// Briefings at their local times; monitoring every 15 minutes.
+const briefingSchedule = startBriefingSchedule({ store, briefings, times: config.briefingTimes, days: config.briefingDays });
+const monitorTimer = setInterval(() => {
+  checkAndAlert({ store, config, scheduler, notifier, claude })
+    .catch((err) => logger.error('monitor check failed', { error: err.message }));
+}, 15 * 60_000);
+
 process.on('unhandledRejection', (err) => logger.error('unhandled rejection', { err }));
 process.on('uncaughtException', (err) => {
   logger.error('uncaught exception', { err });
@@ -75,9 +108,14 @@ process.on('uncaughtException', (err) => {
 });
 
 // Express 5 also calls this callback when listening fails; 'error' below handles that.
-const server = createApp(config, { db, store, scheduler, reasoner }).listen(config.port, config.host, (err) => {
+const server = createApp(config, { db, store, scheduler, reasoner, notifier, claude, briefings }).listen(config.port, config.host, (err) => {
   if (err) return;
-  logger.info('PMO assistant started', { url: `http://${config.host}:${config.port}`, integrations });
+  logger.info('PMO assistant started', {
+    url: `http://${config.host}:${config.port}`,
+    integrations,
+    claude: claude.enabled ? config.claudeModel : 'off',
+    teamsNotifications: notifier.configured ? 'on' : 'dry run',
+  });
 });
 
 server.on('error', (err) => {
@@ -91,6 +129,8 @@ server.on('error', (err) => {
 function shutdown(signal) {
   logger.info('shutting down', { signal });
   scheduler.stop();
+  briefingSchedule.stop();
+  clearInterval(monitorTimer);
   server.close(() => {
     db.close();
     process.exit(0);

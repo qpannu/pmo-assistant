@@ -1,23 +1,60 @@
 # PMO Assistant
 
-A lightweight, local, Claude-powered PMO assistant that tracks priorities across
-Jira, Outlook and Teams. It runs on your machine (`127.0.0.1`), stores data in a
-local SQLite file, and never sends messages or changes Jira without your approval.
+A lightweight PMO assistant that tracks your priorities across Jira, Outlook and Teams,
+ranks them, and sends you a morning briefing, urgent alerts, a midday update and an
+end-of-day summary in Microsoft Teams. It runs on your machine (`127.0.0.1`) and keeps
+its data in one local SQLite file.
 
-## Setup
+**What it will never do:** send an email or Teams message to anyone (drafts wait for
+you to approve and send them yourself), or change Jira tickets, priorities, assignments
+or release dates. All integrations are read-only; the only outgoing message is the
+notification to *you* through your own Teams webhook.
+
+## Quick start
 
 ```bash
-nvm use            # Node 24 (from .nvmrc)
+nvm use                  # Node 24 (from .nvmrc)
 npm install
-cp .env.example .env
+cp .env.example .env     # then fill it in locally — never commit it or paste values into chat
+npm test                 # 100+ tests, no network
+npm run demo:priorities  # see a ranked report on fictional data
+npm start                # http://127.0.0.1:3100
 ```
 
-Fill in `.env` locally. Never commit it or paste its values into chat.
+Minimum to be useful: Jira settings (below). Add the Teams webhook to get notifications,
+Claude for written briefings/answers/drafts, and Microsoft sign-in for Outlook/Teams data.
+Each piece is optional and the service runs without the others.
 
-```bash
-npm test           # unit tests (no network)
-npm start          # http://127.0.0.1:3100
+## How it works
+
 ```
+Jira ─┐                                          ┌─ Teams notifications to you
+Outlook ─┼─ read-only sync (incremental) ─ SQLite ─ rules: signals → action items → scores ─┤  (briefings, urgent alerts)
+Teams ─┘                                          └─ Claude only for writing: briefings,
+                                                     risk analysis, answers, drafts
+```
+
+1. **Sync** every few minutes: only new or changed records are fetched.
+2. **Rules** flag what needs you, merge duplicates across systems, and score every item.
+3. **Alerts**: a newly critical item sends one Teams alert (never repeated).
+4. **Briefings** at 08:00, 12:30 and 17:30 on weekdays (configurable).
+5. **Claude** writes briefings, answers and drafts from a short, pre-ranked context.
+
+## Daily use
+
+| You want to… | Do this |
+|---|---|
+| See today's priorities | `curl 'http://127.0.0.1:3100/priorities?format=text'` |
+| Ask a question | `curl -X POST -H 'Content-Type: application/json' -d '{"question":"What is blocking CCL_8.886.22.10?"}' http://127.0.0.1:3100/ask` |
+| Send a briefing now | `curl -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:3100/briefings/morning/run` (`midday`, `eod`; add `"force":true` to resend) |
+| Draft a reply to an item | `curl -X POST -H 'Content-Type: application/json' -d '{"channel":"email","guidance":"approve, ask who owns rollback"}' http://127.0.0.1:3100/actions/12/draft` |
+| Review drafts | `curl http://127.0.0.1:3100/drafts` · edit: `PATCH /drafts/:id` · `POST /drafts/:id/approve` or `/reject` |
+| Send an approved draft | Use the copy-ready text or the Outlook/Teams link from `approve`, send it yourself, then `POST /drafts/:id/sent` |
+| Close / snooze an item | `curl -X POST -H 'Content-Type: application/json' -d '{"status":"done"}' http://127.0.0.1:3100/actions/12/status` |
+| Check the service | `curl http://127.0.0.1:3100/status` |
+
+POST/PATCH calls must send JSON (`-H 'Content-Type: application/json'`), which stops web
+pages from triggering them from your browser.
 
 ## Jira (read-only)
 
@@ -211,3 +248,94 @@ alert once; re-runs don't repeat it.
 highest-scored items. It is called only when those candidates change, the answer is cached, and
 any failure falls back to the rule-based top three. Notifications (desktop/email/Teams) are not
 connected yet.
+
+## Teams notifications (to you)
+
+Uses a **Teams Workflow webhook** — no Entra app registration needed.
+
+1. In Teams, open **Workflows** (Apps → Workflows) → **Create** → template
+   **"Send webhook alerts to a chat"** (or "Post to a chat when a webhook request is received").
+2. Choose **Post as: Flow bot** and **Post in: Chat with Flow bot** (a private chat with you),
+   then **Save**. Copy the **HTTP POST URL** it shows.
+3. Put it in `.env` as `TEAMS_WEBHOOK_URL=...` and restart. Treat it like a password: anyone
+   with the URL can post to that chat.
+
+Without the URL, notifications are written to the log instead (dry run) and `/status`
+shows `teamsConfigured: false`.
+
+| Notification | When | Content |
+|---|---|---|
+| 🔴 Urgent alert | After a sync finds a new critical item | The item, the next step, and buttons to open the source |
+| ☀️ Morning briefing | `BRIEFING_MORNING` (08:00) | Top 3, cross-project risks, waiting on you, what's new |
+| 🕛 Midday update | `BRIEFING_MIDDAY` (12:30) | Only what changed since the morning |
+| 🌙 End-of-day summary | `BRIEFING_EOD` (17:30) | Closed today, still open for tomorrow, due tomorrow |
+| ⚠️ Service alert | A sync fails for ~3 intervals | Which source and the last error (once per day) |
+
+Briefings go out once per day each, on `BRIEFING_DAYS` (weekdays). If the service starts late,
+it catches up within 3 hours. A failed delivery is retried with the same text.
+
+## Claude (optional, billed per call)
+
+Set `CLAUDE_ENABLED=true` and `ANTHROPIC_API_KEY` (from <https://console.anthropic.com>). Model:
+`CLAUDE_MODEL` (default `claude-opus-5-5`). Without Claude everything still works with
+plain rule-based text.
+
+Claude is called only for:
+
+| Use | Calls | Effort |
+|---|---|---|
+| Morning briefing incl. cross-project risk analysis | 1/day | medium |
+| Midday update | 0–1/day (0 if nothing changed since morning) | low |
+| End-of-day summary | 1/day | low |
+| `/ask` question | 1 per question | low |
+| Draft | 1 per draft | low |
+
+How calls and tokens stay low:
+- Claude never reads raw mailboxes or Jira: it gets at most ~12 pre-ranked items with
+  one-line reasons, evidence snippets and next steps, plus computed per-project and
+  release roll-ups.
+- Midday and end-of-day briefings send only changes; an unchanged midday skips Claude.
+- Questions send only the records that match the question (Jira keys and keywords).
+- `CLAUDE_DAILY_CALL_LIMIT` (default 40) is a hard cap; beyond it the assistant uses rules.
+- Instructions come first with a prompt-cache breakpoint. Put background about your projects
+  and team in a text file and set `PMO_CONTEXT_FILE`: it's sent with each call and cached.
+  (Prompts shorter than the model's minimum cacheable size simply aren't cached.)
+- Every call is logged with its token usage; see `claude.today` in `/status`.
+
+Typical day: 3–8 calls. Check `/status` for actual token use.
+
+## Monitoring and errors
+
+- `GET /health` — process and database.
+- `GET /status` — `ok` or `degraded` with reasons: per-source last sync and last error,
+  stale syncs, today's briefings and how they were produced, alerts waiting for delivery,
+  drafts awaiting review, Claude calls and tokens today.
+- Logs are JSON lines on stdout/stderr; secrets (tokens, keys, webhook URL) are redacted.
+- Every external call has timeouts and retries (Jira, Graph, Teams webhook). Failures are
+  recorded and retried on the next run without losing the sync position.
+- If Claude is off, over its limit, refuses or fails, the rule-based version is used.
+
+## Running it every day (macOS)
+
+The service only needs to run while you work. Simplest: keep a terminal open with
+`nvm use && npm start`. To start it automatically at login, use a LaunchAgent that runs
+`npm start` in this folder with Node 24 on the PATH. Its data stays in `data/`; back that
+folder up if you want to keep history.
+
+Before relying on it daily:
+1. `npm test` passes.
+2. `npm run test:jira` passes (and `test:outlook` / `test:teams` once signed in).
+3. Set `TEAMS_WEBHOOK_URL`, then `POST /briefings/morning/run` with `{"force":true}` and confirm
+   the card arrives in Teams.
+4. If using Claude: set the key, send one morning briefing, and check `claude.today` in `/status`.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `node: bad option: --env-file-if-exists` | Run `nvm use` (Node 24) |
+| `EADDRINUSE` on start | Another instance is running; stop it or change `PORT` |
+| No Teams messages | `/status` → `teamsConfigured`; check the log for "dry run" or webhook HTTP errors |
+| Briefing text is plain lists | Claude is off, over `CLAUDE_DAILY_CALL_LIMIT`, or failed — see `briefingsToday[].method` |
+| `jira sync failed … 401` | Regenerate `JIRA_API_TOKEN` |
+| Outlook/Teams "sign-in required" | `npm run ms:login`, then restart |

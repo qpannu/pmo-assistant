@@ -4,9 +4,7 @@
 
 import { contentHash } from '../store.js';
 import { truncate } from '../text.js';
-import { logger } from '../logger.js';
 
-const log = logger.child({ component: 'priority-claude' });
 const CACHE_KEY = 'priority_reasoning';
 const MAX_CANDIDATES = 8;
 
@@ -33,23 +31,20 @@ const SCHEMA = {
   additionalProperties: false,
 };
 
-function toCandidates(ranked) {
-  return ranked.slice(0, MAX_CANDIDATES).map((i) => ({
+export function toCandidates(ranked, n = MAX_CANDIDATES) {
+  return ranked.slice(0, n).map((i) => ({
     id: i.id,
-    title: i.title,
+    title: truncate(i.title, 120),
     category: i.category,
     score: i.score,
     dueAt: i.dueAt,
-    reasons: i.reasons.map((r) => r.label),
-    evidence: i.sources.map((s) => `${s.system}: ${truncate(s.text, 240)}`),
+    reasons: i.reasons.slice(0, 3).map((r) => r.label),
+    evidence: i.sources.map((s) => `${s.system}: ${truncate(s.text, 200)}`),
     suggestedNextAction: i.nextAction,
   }));
 }
 
-// `client` is injectable for tests; by default the official SDK is loaded lazily.
-export function createClaudeReasoner({ store, apiKey, model, client = null }) {
-  let sdkClient = client;
-
+export function createClaudeReasoner({ store, claude }) {
   return async function reasonTopThree(ranked) {
     const candidates = toCandidates(ranked);
     const hash = contentHash(candidates.map(({ id, score, category, reasons, evidence }) => ({ id, score, category, reasons, evidence })));
@@ -57,41 +52,23 @@ export function createClaudeReasoner({ store, apiKey, model, client = null }) {
     const cached = JSON.parse(store.getSyncState(CACHE_KEY)?.cursor ?? 'null');
     if (cached?.hash === hash) return { ...cached.result, method: 'claude-cached' };
 
-    if (!sdkClient) {
-      if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set');
-      const { default: Anthropic } = await import('@anthropic-ai/sdk');
-      sdkClient = new Anthropic({ apiKey });
-    }
-
-    const response = await sdkClient.beta.messages.create({
-      model,
-      max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
+    const { json } = await claude.complete({
+      purpose: 'top_three',
       system: SYSTEM,
-      messages: [{ role: 'user', content: JSON.stringify({ today: new Date().toISOString().slice(0, 10), candidates }) }],
+      user: JSON.stringify({ today: new Date().toISOString().slice(0, 10), candidates }),
+      effort: 'medium',
+      schema: SCHEMA,
     });
 
-    if (response.stop_reason === 'refusal') throw new Error(`Claude declined (${response.stop_details?.category ?? 'no category'})`);
-    const text = response.content.find((b) => b.type === 'text')?.text;
-    if (!text) throw new Error(`No text in Claude response (stop_reason ${response.stop_reason})`);
-
-    const parsed = JSON.parse(text);
     const byId = new Map(ranked.map((i) => [i.id, i]));
-    const items = parsed.top
+    const items = json.top
       .filter((p) => byId.has(p.id))
       .slice(0, 3)
       .map((p) => ({ id: p.id, title: byId.get(p.id).title, why: p.why, nextAction: byId.get(p.id).nextAction }));
     if (!items.length) throw new Error('Claude returned no valid item ids');
 
-    const result = { method: 'claude', items, summary: parsed.summary };
+    const result = { method: 'claude', items, summary: json.summary };
     store.saveSyncSuccess(CACHE_KEY, JSON.stringify({ hash, result }));
-    log.info('top three reasoned by Claude', {
-      model: response.model,
-      inputTokens: response.usage?.input_tokens,
-      outputTokens: response.usage?.output_tokens,
-    });
     return result;
   };
 }

@@ -5,6 +5,7 @@ import { createStore } from '../src/store.js';
 import { setLogLevel } from '../src/logger.js';
 import { runPriorityEngine } from '../src/priority/engine.js';
 import { createClaudeReasoner } from '../src/priority/reason.js';
+import { createClaude } from '../src/claude/client.js';
 import { formatReport } from '../src/priority/format.js';
 import { syncActions } from '../src/actions.js';
 import { seedSample } from './fixtures/sample-data.js';
@@ -151,7 +152,7 @@ describe('Claude top three (optional)', () => {
     const ranked = all(await run()).sort((a, b) => b.score - a.score);
     const pick = [ranked[2].id, ranked[0].id, ranked[1].id];
     const client = fakeClient([reply({ top: pick.map((id) => ({ id, why: `because ${id}` })), summary: 'Stabilise REST-900 first.' })]);
-    const reasoner = createClaudeReasoner({ store, model: 'claude-opus-5-5', client });
+    const reasoner = createClaudeReasoner({ store, claude: createClaude({ store, model: 'claude-opus-5-5', client }) });
 
     const r1 = await run({ reasoner });
     assert.equal(r1.topThree.method, 'claude');
@@ -175,7 +176,7 @@ describe('Claude top three (optional)', () => {
       { stop_reason: 'refusal', stop_details: { category: null }, content: [] },
       reply({ top: [{ id: 999999, why: 'x' }], summary: 's' }),
     ]);
-    const reasoner = createClaudeReasoner({ store, model: 'claude-opus-5-5', client });
+    const reasoner = createClaudeReasoner({ store, claude: createClaude({ store, model: 'claude-opus-5-5', client }) });
     assert.equal((await run({ reasoner })).topThree.method, 'rules');
     assert.equal((await run({ reasoner })).topThree.method, 'rules');
   });
