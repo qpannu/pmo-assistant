@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadConfig, requireConfig, integrationStatus } from '../src/config.js';
-import { redact } from '../src/logger.js';
+import { redact, setLogLevel } from '../src/logger.js';
 import { createApp } from '../src/app.js';
+import { openDb } from '../src/db.js';
 
 function withEnv(vars, fn) {
   const saved = {};
@@ -66,5 +67,24 @@ test('health endpoint reports status without exposing secrets', async () => {
     assert.equal(missing.status, 404);
   } finally {
     server.close();
+  }
+});
+
+test('health endpoint reports database status', async () => {
+  setLogLevel('warn');
+  const db = openDb(':memory:');
+  const server = createApp(loadConfig(), { db }).listen(0, '127.0.0.1');
+  await new Promise((r) => server.once('listening', r));
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/health`;
+    assert.equal((await (await fetch(url)).json()).db, true);
+
+    db.close();
+    const res = await fetch(url);
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).status, 'degraded');
+  } finally {
+    server.close();
+    setLogLevel('info');
   }
 });

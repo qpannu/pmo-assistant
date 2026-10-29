@@ -1,0 +1,143 @@
+// SQLite via Node's built-in node:sqlite — no extra dependency, one local file.
+// Schema changes are append-only migrations, applied in order on startup.
+
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { logger } from './logger.js';
+
+const MIGRATIONS = [
+  // 1 — initial schema
+  `
+  -- Delta links / "updated since" cursors per source, so each sync only fetches changes.
+  CREATE TABLE sync_state (
+    source          TEXT PRIMARY KEY,           -- 'jira' | 'outlook' | 'teams' | ...
+    cursor          TEXT,
+    last_success_at TEXT,
+    last_error      TEXT,
+    updated_at      TEXT NOT NULL
+  );
+
+  -- Duplicate-event protection: an event is processed only if its id can be claimed here.
+  CREATE TABLE processed_events (
+    source      TEXT NOT NULL,
+    event_id    TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    PRIMARY KEY (source, event_id)
+  );
+
+  -- Normalised copy of each source record. content_hash vs analyzed_hash decides
+  -- whether Claude needs to look at it again — unchanged items are never re-analysed.
+  CREATE TABLE items (
+    id            INTEGER PRIMARY KEY,
+    source        TEXT NOT NULL,
+    external_id   TEXT NOT NULL,
+    kind          TEXT NOT NULL,                -- 'issue' | 'email' | 'chat_message' | ...
+    title         TEXT,
+    url           TEXT,
+    author        TEXT,
+    project       TEXT,
+    occurred_at   TEXT,                         -- source timestamp (updated/received)
+    data          TEXT NOT NULL,                -- JSON, trimmed to fields we use
+    content_hash  TEXT NOT NULL,
+    analyzed_hash TEXT,
+    first_seen_at TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    UNIQUE (source, external_id)
+  );
+  CREATE INDEX items_pending_analysis ON items (source) WHERE analyzed_hash IS NOT content_hash;
+
+  -- Things waiting on me. dedupe_key keeps re-analysis from creating duplicates.
+  CREATE TABLE action_items (
+    id            INTEGER PRIMARY KEY,
+    dedupe_key    TEXT NOT NULL UNIQUE,
+    item_id       INTEGER REFERENCES items(id) ON DELETE SET NULL,
+    type          TEXT NOT NULL CHECK (type IN ('respond','comment','decide','prioritize','follow_up','review','other')),
+    title         TEXT NOT NULL,
+    summary       TEXT,
+    project       TEXT,
+    priority      INTEGER NOT NULL DEFAULT 3 CHECK (priority BETWEEN 1 AND 4),  -- 1 = highest
+    due_at        TEXT,
+    status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','snoozed','done','dismissed')),
+    snoozed_until TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    closed_at     TEXT
+  );
+  CREATE INDEX action_items_open ON action_items (status, priority, due_at);
+
+  CREATE TABLE alerts (
+    id              INTEGER PRIMARY KEY,
+    dedupe_key      TEXT NOT NULL UNIQUE,
+    item_id         INTEGER REFERENCES items(id) ON DELETE SET NULL,
+    severity        TEXT NOT NULL CHECK (severity IN ('info','warning','critical')),
+    title           TEXT NOT NULL,
+    detail          TEXT,
+    created_at      TEXT NOT NULL,
+    acknowledged_at TEXT
+  );
+
+  -- Outgoing emails / Teams messages / Jira changes. Nothing is sent unless status = 'approved'.
+  CREATE TABLE drafts (
+    id             INTEGER PRIMARY KEY,
+    action_item_id INTEGER REFERENCES action_items(id) ON DELETE SET NULL,
+    channel        TEXT NOT NULL CHECK (channel IN ('email','teams','jira_comment','jira_update')),
+    target         TEXT NOT NULL,               -- JSON: recipients / chat id / issue key
+    subject        TEXT,
+    body           TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','sending','sent','failed')),
+    error          TEXT,
+    created_at     TEXT NOT NULL,
+    decided_at     TEXT,
+    sent_at        TEXT
+  );
+
+  -- Audit trail of everything the assistant did or the user decided.
+  CREATE TABLE history (
+    id          INTEGER PRIMARY KEY,
+    entity_type TEXT NOT NULL,
+    entity_id   INTEGER,
+    event       TEXT NOT NULL,
+    detail      TEXT,
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX history_entity ON history (entity_type, entity_id);
+  `,
+];
+
+export function openDb(path) {
+  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+  const db = new DatabaseSync(path);
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA foreign_keys = ON;
+    PRAGMA busy_timeout = 5000;
+  `);
+  migrate(db);
+  return db;
+}
+
+function migrate(db) {
+  const current = db.prepare('PRAGMA user_version').get().user_version;
+  for (let v = current; v < MIGRATIONS.length; v++) {
+    transaction(db, () => {
+      db.exec(MIGRATIONS[v]);
+      db.exec(`PRAGMA user_version = ${v + 1}`);
+    });
+    logger.info('db migrated', { version: v + 1 });
+  }
+}
+
+// Runs fn inside a transaction; nested calls join the outer one.
+export function transaction(db, fn) {
+  if (db.isTransaction) return fn();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}

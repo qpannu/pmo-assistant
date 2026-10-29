@@ -2,7 +2,7 @@ import express from 'express';
 import { integrationStatus } from './config.js';
 import { logger } from './logger.js';
 
-export function createApp(config) {
+export function createApp(config, { db } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
@@ -16,9 +16,19 @@ export function createApp(config) {
   });
 
   app.get('/health', (req, res) => {
-    res.json({
-      status: 'ok',
+    let dbOk;
+    if (db) {
+      try {
+        dbOk = db.prepare('SELECT 1 AS ok').get().ok === 1;
+      } catch (err) {
+        logger.error('db health check failed', { err });
+        dbOk = false;
+      }
+    }
+    res.status(dbOk === false ? 503 : 200).json({
+      status: dbOk === false ? 'degraded' : 'ok',
       uptimeSec: Math.round(process.uptime()),
+      db: dbOk,
       integrations: integrationStatus(config),
     });
   });
