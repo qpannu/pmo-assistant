@@ -21,9 +21,9 @@ test('migrations run once and are idempotent on reopen', () => {
     const path = join(dir, 'nested', 'pmo.db');
     openDb(path).close();
     const again = openDb(path);
-    assert.equal(again.prepare('PRAGMA user_version').get().user_version, 1);
+    assert.equal(again.prepare('PRAGMA user_version').get().user_version, 2);
     const tables = again.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`).all().map((r) => r.name);
-    assert.deepEqual(tables, ['action_items', 'alerts', 'drafts', 'history', 'items', 'processed_events', 'sync_state']);
+    assert.deepEqual(tables, ['action_item_sources', 'action_items', 'alerts', 'drafts', 'history', 'items', 'processed_events', 'sync_state']);
     again.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });

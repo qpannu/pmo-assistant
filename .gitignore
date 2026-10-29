@@ -8,6 +8,7 @@ node_modules/
 *.pem
 *.key
 .msal-cache*.json
+.ms-token*.json
 
 # Local data and logs
 data/

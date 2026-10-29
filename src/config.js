@@ -63,7 +63,19 @@ export function loadConfig() {
     ms: Object.freeze({
       tenantId: str('MS_TENANT_ID'),
       clientId: str('MS_CLIENT_ID'),
-      tokenCachePath: str('MS_TOKEN_CACHE_PATH', './data/.msal-cache.json'),
+      tokenCachePath: str('MS_TOKEN_CACHE_PATH', './data/.ms-token.json'),
+      outlookEnabled: str('MS_OUTLOOK_ENABLED', 'true') === 'true',
+      teamsEnabled: str('MS_TEAMS_ENABLED', 'true') === 'true',
+      // First sync looks back this far; later syncs are incremental.
+      mailLookbackDays: int('MS_MAIL_LOOKBACK_DAYS', 14, { min: 1, max: 90 }),
+      teamsLookbackDays: int('MS_TEAMS_LOOKBACK_DAYS', 7, { min: 1, max: 60 }),
+      // A request older than this no longer counts as needing my response.
+      replyWindowDays: int('MS_REPLY_WINDOW_DAYS', 7, { min: 1, max: 60 }),
+      // Flag my own questions that got no answer after this many days.
+      followUpAfterDays: int('MS_FOLLOWUP_AFTER_DAYS', 3, { min: 1, max: 30 }),
+      // Optional Teams channels to watch, as "Team name/Channel name" (needs admin consent).
+      teamsChannels: list('MS_TEAMS_CHANNELS'),
+      maxMessagesPerSync: int('MS_MAX_MESSAGES_PER_SYNC', 500, { min: 10, max: 5000 }),
     }),
 
     syncMinutes: Object.freeze({
@@ -90,6 +102,17 @@ export function integrationStatus(config) {
     jira: Boolean(config.jira.baseUrl && config.jira.email && config.jira.apiToken),
     microsoft: Boolean(config.ms.tenantId && config.ms.clientId),
   };
+}
+
+// Delegated Graph permissions, limited to what the enabled features need.
+export function msScopes(ms) {
+  const scopes = ['offline_access', 'User.Read'];
+  if (ms.outlookEnabled) scopes.push('Mail.Read');
+  if (ms.teamsEnabled) {
+    scopes.push('Chat.Read');
+    if (ms.teamsChannels.length) scopes.push('Team.ReadBasic.All', 'Channel.ReadBasic.All', 'ChannelMessage.Read.All');
+  }
+  return scopes;
 }
 
 export const config = loadConfig();

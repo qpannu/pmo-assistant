@@ -64,23 +64,48 @@ export function createStore(db) {
   // ─── Items ─────────────────────────────────────────────────────────────────
   // Inserts or updates a source record. `changed` is false when the content is
   // identical to what we already have, so callers can skip all further work.
-  function upsertItem({ source, externalId, kind, title = null, url = null, author = null, project = null, occurredAt = null, data = {} }) {
+  function upsertItem({ source, externalId, kind, title = null, url = null, author = null, project = null, occurredAt = null, threadKey = null, data = {} }) {
     const hash = contentHash({ kind, title, author, project, data });
     const ts = now();
     return transaction(db, () => {
       const existing = stmt(`SELECT id, content_hash FROM items WHERE source = ? AND external_id = ?`).get(source, externalId);
       if (existing?.content_hash === hash) return { id: existing.id, isNew: false, changed: false };
       if (existing) {
-        stmt(`UPDATE items SET kind = ?, title = ?, url = ?, author = ?, project = ?, occurred_at = ?, data = ?,
+        stmt(`UPDATE items SET kind = ?, title = ?, url = ?, author = ?, project = ?, occurred_at = ?, thread_key = ?, data = ?,
                 content_hash = ?, updated_at = ? WHERE id = ?`)
-          .run(kind, title, url, author, project, occurredAt, JSON.stringify(data), hash, ts, existing.id);
+          .run(kind, title, url, author, project, occurredAt, threadKey, JSON.stringify(data), hash, ts, existing.id);
         return { id: existing.id, isNew: false, changed: true };
       }
-      const r = stmt(`INSERT INTO items (source, external_id, kind, title, url, author, project, occurred_at, data,
-                        content_hash, first_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(source, externalId, kind, title, url, author, project, occurredAt, JSON.stringify(data), hash, ts, ts);
+      const r = stmt(`INSERT INTO items (source, external_id, kind, title, url, author, project, occurred_at, thread_key, data,
+                        content_hash, first_seen_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(source, externalId, kind, title, url, author, project, occurredAt, threadKey, JSON.stringify(data), hash, ts, ts);
       return { id: Number(r.lastInsertRowid), isNew: true, changed: true };
     });
+  }
+
+  const parseRow = (r) => ({ ...r, data: JSON.parse(r.data) });
+
+  function getItemByExternalId(source, externalId) {
+    const row = stmt(`SELECT * FROM items WHERE source = ? AND external_id = ?`).get(source, externalId);
+    return row ? parseRow(row) : null;
+  }
+
+  function listThread(source, threadKey) {
+    return stmt(`SELECT * FROM items WHERE source = ? AND thread_key = ? ORDER BY occurred_at`).all(source, threadKey).map(parseRow);
+  }
+
+  // Items of a source that occurred on/after `since` (ISO), for local re-evaluation.
+  function listItemsSince(source, since) {
+    return stmt(`SELECT * FROM items WHERE source = ? AND occurred_at >= ? ORDER BY occurred_at`).all(source, since).map(parseRow);
+  }
+
+  // Items whose current content hasn't been turned into action items yet.
+  function itemsNeedingActions(limit = 1000) {
+    return stmt(`SELECT * FROM items WHERE actions_hash IS NOT content_hash ORDER BY id LIMIT ?`).all(limit).map(parseRow);
+  }
+
+  function markActionsDerived(itemId, hash) {
+    stmt(`UPDATE items SET actions_hash = ? WHERE id = ?`).run(hash, itemId);
   }
 
   function getItem(id) {
@@ -107,16 +132,23 @@ export function createStore(db) {
   }
 
   // ─── Action items ──────────────────────────────────────────────────────────
-  // Re-analysis refreshes details but never reopens something I closed.
+  // Re-analysis refreshes details but never reopens something I closed or
+  // dismissed. Items the system auto-closed (trigger went away) reopen when a
+  // new trigger arrives.
   function upsertActionItem({ dedupeKey, itemId = null, type, title, summary = null, project = null, priority = 3, dueAt = null }) {
     const ts = now();
     return transaction(db, () => {
-      const existing = stmt(`SELECT id FROM action_items WHERE dedupe_key = ?`).get(dedupeKey);
+      const existing = stmt(`SELECT id, status, closed_reason FROM action_items WHERE dedupe_key = ?`).get(dedupeKey);
       if (existing) {
         stmt(`UPDATE action_items SET item_id = COALESCE(?, item_id), type = ?, title = ?, summary = ?, project = ?,
                 priority = ?, due_at = ?, updated_at = ? WHERE id = ?`)
           .run(itemId, type, title, summary, project, priority, dueAt, ts, existing.id);
-        return { id: existing.id, created: false };
+        const reopened = existing.status === 'done' && existing.closed_reason === 'auto';
+        if (reopened) {
+          stmt(`UPDATE action_items SET status = 'open', closed_at = NULL, closed_reason = NULL WHERE id = ?`).run(existing.id);
+          addHistory('action_item', existing.id, 'reopened');
+        }
+        return { id: existing.id, created: false, reopened };
       }
       const r = stmt(`INSERT INTO action_items (dedupe_key, item_id, type, title, summary, project, priority, due_at,
                         created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -127,16 +159,46 @@ export function createStore(db) {
     });
   }
 
-  function setActionStatus(id, status, { snoozedUntil = null } = {}) {
+  // reason: 'user' (my decision, never undone automatically) or 'auto'.
+  function setActionStatus(id, status, { snoozedUntil = null, reason = 'user' } = {}) {
     if (status === 'snoozed' && !snoozedUntil) throw new Error('snoozedUntil is required when snoozing');
     const ts = now();
-    const closed = status === 'done' || status === 'dismissed' ? ts : null;
+    const isClosed = status === 'done' || status === 'dismissed';
     return transaction(db, () => {
-      const r = stmt(`UPDATE action_items SET status = ?, snoozed_until = ?, closed_at = ?, updated_at = ? WHERE id = ?`)
-        .run(status, status === 'snoozed' ? snoozedUntil : null, closed, ts, id);
-      if (r.changes) addHistory('action_item', id, `status:${status}`, snoozedUntil ? { snoozedUntil } : undefined);
+      const r = stmt(`UPDATE action_items SET status = ?, snoozed_until = ?, closed_at = ?, closed_reason = ?, updated_at = ? WHERE id = ?`)
+        .run(status, status === 'snoozed' ? snoozedUntil : null, isClosed ? ts : null, isClosed ? reason : null, ts, id);
+      if (r.changes) {
+        const detail = { ...(snoozedUntil && { snoozedUntil }), ...(reason !== 'user' && { reason }) };
+        addHistory('action_item', id, `status:${status}`, Object.keys(detail).length ? detail : undefined);
+      }
       return r.changes === 1;
     });
+  }
+
+  function getActionItem(id) {
+    return stmt(`SELECT * FROM action_items WHERE id = ?`).get(id) ?? null;
+  }
+
+  function linkActionSource(actionItemId, itemId) {
+    stmt(`INSERT OR IGNORE INTO action_item_sources (action_item_id, item_id, linked_at) VALUES (?, ?, ?)`).run(actionItemId, itemId, now());
+  }
+
+  function unlinkActionSource(actionItemId, itemId) {
+    stmt(`DELETE FROM action_item_sources WHERE action_item_id = ? AND item_id = ?`).run(actionItemId, itemId);
+  }
+
+  function actionsForItem(itemId) {
+    return stmt(`SELECT a.* FROM action_items a JOIN action_item_sources s ON s.action_item_id = a.id WHERE s.item_id = ?`).all(itemId);
+  }
+
+  // Source items behind an action, newest first, with links back to the originals.
+  function listActionSources(actionItemId) {
+    return stmt(`SELECT i.id, i.source, i.kind, i.title, i.url, i.author, i.occurred_at FROM items i
+      JOIN action_item_sources s ON s.item_id = i.id WHERE s.action_item_id = ? ORDER BY i.occurred_at DESC`).all(actionItemId);
+  }
+
+  function countActionSources(actionItemId) {
+    return stmt(`SELECT COUNT(*) AS n FROM action_item_sources WHERE action_item_id = ?`).get(actionItemId).n;
   }
 
   // Open items plus snoozed ones whose snooze has expired; most urgent first.
@@ -225,8 +287,10 @@ export function createStore(db) {
     addHistory, listHistory,
     getSyncState, saveSyncSuccess, saveSyncError,
     claimEvent, pruneProcessedEvents,
-    upsertItem, getItem, listItems, itemsNeedingAnalysis, markAnalyzed,
-    upsertActionItem, setActionStatus, listOpenActions,
+    upsertItem, getItem, getItemByExternalId, listItems, listThread, listItemsSince,
+    itemsNeedingAnalysis, markAnalyzed, itemsNeedingActions, markActionsDerived,
+    upsertActionItem, setActionStatus, getActionItem, listOpenActions,
+    linkActionSource, unlinkActionSource, actionsForItem, listActionSources, countActionSources,
     raiseAlert, acknowledgeAlert, listActiveAlerts,
     createDraft, getDraft, listDrafts, editDraft, approveDraft, rejectDraft,
     claimDraftForSend, markDraftSent, markDraftFailed,

@@ -103,6 +103,29 @@ const MIGRATIONS = [
   );
   CREATE INDEX history_entity ON history (entity_type, entity_id);
   `,
+
+  // 2 — threads, action-item sources, system vs user closure
+  `
+  -- Conversation / chat / thread an item belongs to (for "did I reply?" checks).
+  ALTER TABLE items ADD COLUMN thread_key TEXT;
+  CREATE INDEX items_thread ON items (source, thread_key);
+  -- content_hash last turned into action items (independent of Claude's analyzed_hash).
+  ALTER TABLE items ADD COLUMN actions_hash TEXT;
+
+  -- 'user' when I closed it, 'auto' when the trigger went away (e.g. I replied).
+  -- Only auto-closed items may reopen on a new trigger.
+  ALTER TABLE action_items ADD COLUMN closed_reason TEXT;
+
+  -- One action item can be backed by several source items (same issue across
+  -- Jira, email and Teams); each link preserves the way back to the original.
+  CREATE TABLE action_item_sources (
+    action_item_id INTEGER NOT NULL REFERENCES action_items(id) ON DELETE CASCADE,
+    item_id        INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    linked_at      TEXT NOT NULL,
+    PRIMARY KEY (action_item_id, item_id)
+  );
+  CREATE INDEX action_item_sources_item ON action_item_sources (item_id);
+  `,
 ];
 
 export function openDb(path) {

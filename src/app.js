@@ -1,7 +1,11 @@
 import express from 'express';
 import { integrationStatus } from './config.js';
 import { logger } from './logger.js';
-import { jiraRoutes } from './routes/jira.js';
+import { sourceRoutes } from './routes/sources.js';
+import { actionRoutes } from './routes/actions.js';
+import { jiraOverview } from './jira/sync.js';
+import { outlookOverview } from './outlook/sync.js';
+import { teamsOverview } from './teams/sync.js';
 
 export function createApp(config, { db, store, scheduler } = {}) {
   const app = express();
@@ -34,7 +38,21 @@ export function createApp(config, { db, store, scheduler } = {}) {
     });
   });
 
-  if (store && scheduler) app.use('/jira', jiraRoutes({ store, scheduler }));
+  if (store && scheduler) {
+    app.use('/jira', sourceRoutes({
+      task: 'jira', scheduler, overview: () => jiraOverview(store),
+      setupHint: 'Set JIRA_BASE_URL, JIRA_EMAIL and JIRA_API_TOKEN in .env.',
+    }));
+    app.use('/outlook', sourceRoutes({
+      task: 'outlook', scheduler, overview: () => outlookOverview(store),
+      setupHint: 'Set MS_TENANT_ID and MS_CLIENT_ID in .env, run `npm run ms:login`, then restart.',
+    }));
+    app.use('/teams', sourceRoutes({
+      task: 'teams', scheduler, overview: () => teamsOverview(store),
+      setupHint: 'Set MS_TENANT_ID and MS_CLIENT_ID in .env, run `npm run ms:login`, then restart.',
+    }));
+    app.use('/actions', actionRoutes({ store }));
+  }
 
   app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 

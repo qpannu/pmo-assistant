@@ -74,7 +74,7 @@ Upcoming and recently overdue releases get a risk level (`none` / `warning` / `c
 with reasons: overdue with open work, blocked issues, high-priority bugs, or open work
 with ≤3 days left.
 
-### Efficiency
+### Jira efficiency
 
 - First run and every `JIRA_FULL_SYNC_HOURS` (default 24): full fetch of open relevant issues.
 - In between: only issues updated since the last sync (+2 min overlap).
@@ -82,3 +82,98 @@ with ≤3 days left.
 - Stored content is hashed; an issue whose relevant fields didn't change is not marked for
   re-analysis, even if Jira's `updated` timestamp moved.
 - Syncs never overlap; failures are logged and recorded without losing the sync position.
+
+## Outlook and Teams (read-only, Microsoft Graph)
+
+### 1. Register an app in Microsoft Entra ID (one time, free)
+
+1. Open <https://entra.microsoft.com> → **Identity → Applications → App registrations → New registration**.
+   - Name: `PMO Assistant (local)`
+   - Supported account types: **Accounts in this organizational directory only** (single tenant)
+   - Redirect URI: leave empty → **Register**
+2. On the app's **Overview** page, copy **Application (client) ID** and **Directory (tenant) ID**
+   into your local `.env` as `MS_CLIENT_ID` and `MS_TENANT_ID`. These are identifiers, not secrets.
+3. **Authentication → Advanced settings → Allow public client flows → Yes → Save.**
+   (Needed for the device-code sign-in. Do **not** create a client secret; none is used.)
+4. **API permissions → Add a permission → Microsoft Graph → Delegated permissions**, add:
+
+   | Permission | Why | Admin consent |
+   |---|---|---|
+   | `User.Read` | Your name and email address | No |
+   | `offline_access` | Stay signed in (refresh token) | No |
+   | `Mail.Read` | Read your mailbox (Inbox, Sent Items) | No* |
+   | `Chat.Read` | Read your 1:1, group and meeting chats | No* |
+
+   Only if you set `MS_TEAMS_CHANNELS` (watch specific channels):
+
+   | Permission | Why | Admin consent |
+   |---|---|---|
+   | `Team.ReadBasic.All`, `Channel.ReadBasic.All` | Find the teams/channels by name | No* |
+   | `ChannelMessage.Read.All` | Read messages in those channels | **Yes** |
+
+   \*Your organisation may still require an admin to approve. If sign-in says
+   "Need admin approval", ask IT to **Grant admin consent** on this app's API permissions page.
+
+   No `Mail.Send`, `Chat.ReadWrite` or other write permission is requested: the assistant cannot
+   send email or Teams messages.
+
+### 2. Sign in
+
+```bash
+npm run ms:login
+```
+
+It prints a code; open <https://microsoft.com/devicelogin>, enter it and sign in with your
+work account. Your password goes only to Microsoft. The resulting token is saved to
+`data/.ms-token.json` (git-ignored, readable only by you). Restart the server afterwards.
+
+### 3. Test each integration
+
+```bash
+npm run test:outlook   # profile, inbox delta query, sent items (read-only)
+npm run test:teams     # recent chats, incremental message query, configured channels
+```
+
+Then with the server running:
+
+```bash
+curl -X POST http://127.0.0.1:3100/outlook/sync && curl http://127.0.0.1:3100/outlook/overview
+curl -X POST http://127.0.0.1:3100/teams/sync   && curl http://127.0.0.1:3100/teams/overview
+curl http://127.0.0.1:3100/actions
+```
+
+### What counts as needing you
+
+**Email** — unread alone never does. A message needs you when it is from a person (not a
+notification, newsletter or Focused-Inbox "Other"), addressed to you (in To with ≤10 recipients,
+or names you), recent (`MS_REPLY_WINDOW_DAYS`), asks a question / request / approval /
+decision, and you haven't replied in that conversation since. Flagged emails are follow-ups.
+From your Sent Items: promises you made ("I'll send…") and questions nobody answered after
+`MS_FOLLOWUP_AFTER_DAYS`. Deadlines like "by Friday" or "EOD" set the due date.
+
+**Teams** — @mentions, 1:1 messages and messages naming you that ask, request or need a
+decision, unless you replied later in that chat/thread. Urgent project or release discussions
+(e.g. "prod is down after the release") are surfaced even when not addressed to you.
+
+**Incremental:** Outlook uses Graph delta queries (Inbox and Sent Items). Teams lists chats by
+latest activity and only reads chats active since the last check, fetching messages modified
+since each chat's cursor; channels use delta queries. Metered/paid Graph APIs are not used.
+
+## Action items
+
+Findings from Jira, Outlook and Teams become action items (`respond`, `decide`, `prioritize`,
+`follow_up`, `review`) with priority 1–4 and due dates.
+
+- **Deduplicated:** an email and a Teams message about `REST-21533` and the Jira issue itself
+  produce one action, with all three linked as sources. Otherwise one action per email
+  conversation or chat thread.
+- **Self-resolving:** when you reply (or the Jira condition clears) the action closes
+  automatically and reopens if a new request arrives. Items you close or dismiss stay closed.
+
+```bash
+curl http://127.0.0.1:3100/actions
+curl -X POST -H 'Content-Type: application/json' -d '{"status":"done"}' http://127.0.0.1:3100/actions/12/status
+```
+
+Statuses: `open`, `done`, `dismissed`, `snoozed` (with `"snoozedUntil": "2026-11-03"`). Changing a
+status only updates the local database.

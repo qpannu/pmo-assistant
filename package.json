@@ -16,7 +16,13 @@
     "pretest": "node scripts/check-node.cjs",
     "test": "node --test test/*.test.js",
     "pretest:jira": "node scripts/check-node.cjs",
-    "test:jira": "node --env-file-if-exists=.env --test test/jira.live.test.js"
+    "test:jira": "node --env-file-if-exists=.env --test test/jira.live.test.js",
+    "prems:login": "node scripts/check-node.cjs",
+    "ms:login": "node --env-file-if-exists=.env src/microsoft/login.js",
+    "pretest:outlook": "node scripts/check-node.cjs",
+    "test:outlook": "node --env-file-if-exists=.env --test test/outlook.live.test.js",
+    "pretest:teams": "node scripts/check-node.cjs",
+    "test:teams": "node --env-file-if-exists=.env --test test/teams.live.test.js"
   },
   "dependencies": {
     "express": "^5.3.0"
