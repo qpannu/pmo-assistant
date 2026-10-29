@@ -126,6 +126,15 @@ const MIGRATIONS = [
   );
   CREATE INDEX action_item_sources_item ON action_item_sources (item_id);
   `,
+
+  // 3 — priority engine ranking, kept between runs
+  `
+  ALTER TABLE action_items ADD COLUMN score INTEGER;
+  ALTER TABLE action_items ADD COLUMN category TEXT;
+  ALTER TABLE action_items ADD COLUMN score_reasons TEXT;   -- JSON [{points, label}]
+  ALTER TABLE action_items ADD COLUMN ranked_at TEXT;
+  ALTER TABLE alerts ADD COLUMN action_item_id INTEGER REFERENCES action_items(id) ON DELETE SET NULL;
+  `,
 ];
 
 export function openDb(path) {

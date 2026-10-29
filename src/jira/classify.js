@@ -1,6 +1,8 @@
 // Rule-based signals — cheap, deterministic and free of Claude tokens. Claude
 // later works only on items these rules mark as relevant and changed.
 
+import { detectIntents } from '../text.js';
+
 export const SIGNALS = Object.freeze({
   ASSIGNED_TO_ME: 'assigned_to_me',
   OVERDUE: 'overdue',
@@ -76,8 +78,10 @@ export function issueSignals(issue, myAccountId, rules, { now, updatedAt }) {
     out.add(SIGNALS.AWAITING_DECISION);
   }
 
+  // A mention only needs a reply if it asks something ("thanks @you" doesn't).
   const last = issue.recentComments.at(-1);
-  if (last && last.author?.accountId !== myAccountId && last.mentions.includes(myAccountId)
+  const asks = last && (({ question, request, approval, decision }) => question || request || approval || decision)(detectIntents(last.text));
+  if (last && asks && last.author?.accountId !== myAccountId && last.mentions.includes(myAccountId)
       && ageDays(last.created, now) <= rules.replyWindowDays) {
     out.add(SIGNALS.AWAITING_REPLY);
   }

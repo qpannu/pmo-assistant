@@ -197,6 +197,21 @@ export function createStore(db) {
       JOIN action_item_sources s ON s.item_id = i.id WHERE s.action_item_id = ? ORDER BY i.occurred_at DESC`).all(actionItemId);
   }
 
+  // Full source items (with data) behind an action, for scoring and evidence.
+  function listActionSourceItems(actionItemId) {
+    return stmt(`SELECT i.* FROM items i JOIN action_item_sources s ON s.item_id = i.id
+      WHERE s.action_item_id = ? ORDER BY i.occurred_at`).all(actionItemId).map(parseRow);
+  }
+
+  // Writes only when the ranking actually changed, so unchanged runs are no-ops.
+  function saveActionRanking(id, { score, category, reasons }) {
+    const json = JSON.stringify(reasons);
+    const r = stmt(`UPDATE action_items SET score = ?, category = ?, score_reasons = ?, ranked_at = ?
+      WHERE id = ? AND (score IS NOT ? OR category IS NOT ? OR score_reasons IS NOT ?)`)
+      .run(score, category, json, now(), id, score, category, json);
+    return r.changes === 1;
+  }
+
   function countActionSources(actionItemId) {
     return stmt(`SELECT COUNT(*) AS n FROM action_item_sources WHERE action_item_id = ?`).get(actionItemId).n;
   }
@@ -214,9 +229,9 @@ export function createStore(db) {
 
   // ─── Alerts ────────────────────────────────────────────────────────────────
   // created = false means this alert was already raised; don't notify again.
-  function raiseAlert({ dedupeKey, itemId = null, severity, title, detail = null }) {
-    const r = stmt(`INSERT OR IGNORE INTO alerts (dedupe_key, item_id, severity, title, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(dedupeKey, itemId, severity, title, detail, now());
+  function raiseAlert({ dedupeKey, itemId = null, actionItemId = null, severity, title, detail = null }) {
+    const r = stmt(`INSERT OR IGNORE INTO alerts (dedupe_key, item_id, action_item_id, severity, title, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(dedupeKey, itemId, actionItemId, severity, title, detail, now());
     if (r.changes) return { id: Number(r.lastInsertRowid), created: true };
     return { id: stmt(`SELECT id FROM alerts WHERE dedupe_key = ?`).get(dedupeKey).id, created: false };
   }
@@ -290,7 +305,8 @@ export function createStore(db) {
     upsertItem, getItem, getItemByExternalId, listItems, listThread, listItemsSince,
     itemsNeedingAnalysis, markAnalyzed, itemsNeedingActions, markActionsDerived,
     upsertActionItem, setActionStatus, getActionItem, listOpenActions,
-    linkActionSource, unlinkActionSource, actionsForItem, listActionSources, countActionSources,
+    linkActionSource, unlinkActionSource, actionsForItem, listActionSources, listActionSourceItems,
+    countActionSources, saveActionRanking,
     raiseAlert, acknowledgeAlert, listActiveAlerts,
     createDraft, getDraft, listDrafts, editDraft, approveDraft, rejectDraft,
     claimDraftForSend, markDraftSent, markDraftFailed,

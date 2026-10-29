@@ -177,3 +177,37 @@ curl -X POST -H 'Content-Type: application/json' -d '{"status":"done"}' http://1
 
 Statuses: `open`, `done`, `dismissed`, `snoozed` (with `"snoozedUntil": "2026-11-03"`). Changing a
 status only updates the local database.
+
+## Priority engine
+
+One ranked list across Jira, Outlook and Teams, recomputed after every sync.
+
+```bash
+npm run demo:priorities                              # fictional sample data, in memory
+curl 'http://127.0.0.1:3100/priorities?format=text'  # your real list (no alerts raised)
+curl -X POST http://127.0.0.1:3100/priorities/run    # rank and record new critical alerts
+curl http://127.0.0.1:3100/alerts                    # unacknowledged alerts
+```
+
+The report has five parts: **critical actions**, **decisions & responses waiting for you**,
+**upcoming release risks**, **follow-ups & overdue commitments**, and a **recommended top three**.
+Every item lists its source (with a link), the evidence quoted from it, why it scored as it did,
+and a recommended next action.
+
+**Scoring (ordinary code, no AI).** Points for: production blockers (+40); releases at critical
+or warning risk (+45 / +25), and issues inside them (+25 / +12); blockers and dependencies (+10–12);
+urgent wording (+25); business impact words such as merchants, payments, outage (+8); decisions
+(+18) and replies (+15) waiting on you, growing with each day waited; overdue items (+20–40;
+more than 60 days overdue is treated as probably stale, +5); items raised in more than one system (+8);
+plus the action's base priority. Score ≥ 70, a production blocker, or a critical release makes an
+item critical.
+
+**State between runs.** Rankings are stored on each action item and rewritten only when they change.
+Items you mark done, dismissed or snoozed stay that way across syncs. Each critical item raises an
+alert once; re-runs don't repeat it.
+
+**Claude (optional, billed).** With `PRIORITY_USE_CLAUDE=true` and `ANTHROPIC_API_KEY` set, Claude
+(`CLAUDE_MODEL`, default `claude-opus-5-5`) picks and explains the top three from the eight
+highest-scored items. It is called only when those candidates change, the answer is cached, and
+any failure falls back to the rule-based top three. Notifications (desktop/email/Teams) are not
+connected yet.

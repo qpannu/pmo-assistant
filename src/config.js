@@ -32,6 +32,10 @@ export function loadConfig() {
     dbPath: str('DB_PATH', './data/pmo.db'),
 
     anthropicApiKey: str('ANTHROPIC_API_KEY'),
+    // Claude is used only to reason about the top three priorities, and only
+    // when explicitly enabled — it is billed per call.
+    priorityUseClaude: str('PRIORITY_USE_CLAUDE', 'false') === 'true',
+    claudeModel: str('CLAUDE_MODEL', 'claude-opus-5-5'),
 
     jira: Object.freeze({
       baseUrl: str('JIRA_BASE_URL').replace(/\/+$/, ''),

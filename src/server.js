@@ -11,6 +11,8 @@ import { createGraphClient } from './microsoft/graph.js';
 import { syncOutlook } from './outlook/sync.js';
 import { syncTeams } from './teams/sync.js';
 import { syncActions } from './actions.js';
+import { runPriorityEngine } from './priority/engine.js';
+import { createClaudeReasoner } from './priority/reason.js';
 
 setLogLevel(config.logLevel);
 
@@ -20,8 +22,21 @@ const store = createStore(db);
 const scheduler = createScheduler();
 const integrations = integrationStatus(config);
 
-// Every sync is followed by turning changed items into action items.
-const thenActions = (sync) => async () => ({ ...(await sync()), actions: syncActions(store) });
+// Claude only reasons about the top three, only when enabled, and only when
+// the top candidates changed since the last call.
+const reasoner = config.priorityUseClaude && config.anthropicApiKey
+  ? createClaudeReasoner({ store, apiKey: config.anthropicApiKey, model: config.claudeModel })
+  : null;
+if (config.priorityUseClaude && !config.anthropicApiKey) logger.warn('PRIORITY_USE_CLAUDE is on but ANTHROPIC_API_KEY is empty; using rules only');
+
+// Every sync is followed by turning changed items into action items and
+// re-ranking. Critical alerts are deduplicated, so re-runs don't repeat them.
+const thenActions = (sync) => async () => {
+  const result = await sync();
+  const actions = syncActions(store);
+  const { counts, newAlerts } = await runPriorityEngine(store, { reasoner, raiseAlerts: true });
+  return { ...result, actions, priorities: counts, newAlerts: newAlerts.length };
+};
 
 if (integrations.jira) {
   const client = createJiraClient(config.jira);
@@ -60,7 +75,7 @@ process.on('uncaughtException', (err) => {
 });
 
 // Express 5 also calls this callback when listening fails; 'error' below handles that.
-const server = createApp(config, { db, store, scheduler }).listen(config.port, config.host, (err) => {
+const server = createApp(config, { db, store, scheduler, reasoner }).listen(config.port, config.host, (err) => {
   if (err) return;
   logger.info('PMO assistant started', { url: `http://${config.host}:${config.port}`, integrations });
 });

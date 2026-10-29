@@ -166,12 +166,14 @@ describe('classify', () => {
     assert.ok(signals({ status: 'pending decision' }).includes(SIGNALS.AWAITING_DECISION));
   });
 
-  test('awaiting reply only for a recent latest comment that mentions me and is not mine', () => {
-    const mention = (author, created = '2026-10-27T09:00:00.000+0000') =>
-      ({ id: '1', author: { accountId: author, displayName: 'x' }, created, body: adf({ type: 'mention', attrs: { id: ME } }) });
+  test('awaiting reply only for a recent latest comment that mentions me, asks something, and is not mine', () => {
+    const mention = (author, created = '2026-10-27T09:00:00.000+0000', text = ' can you confirm the scope?') =>
+      ({ id: '1', author: { accountId: author, displayName: 'x' }, created,
+        body: adf({ type: 'mention', attrs: { id: ME } }, { type: 'text', text }) });
     assert.ok(signals({ comments: [mention(OTHER)] }).includes(SIGNALS.AWAITING_REPLY));
     assert.ok(!signals({ comments: [mention(ME)] }).includes(SIGNALS.AWAITING_REPLY));
     assert.ok(!signals({ comments: [mention(OTHER, '2026-09-01T09:00:00.000+0000')] }).includes(SIGNALS.AWAITING_REPLY), 'stale mention');
+    assert.ok(!signals({ comments: [mention(OTHER, undefined, ' Thank you for the update.')] }).includes(SIGNALS.AWAITING_REPLY), 'thanks is not a question');
   });
 
   test('production blockers and blocked issues; done issues have no signals', () => {

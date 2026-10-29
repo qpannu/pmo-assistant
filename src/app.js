@@ -3,11 +3,12 @@ import { integrationStatus } from './config.js';
 import { logger } from './logger.js';
 import { sourceRoutes } from './routes/sources.js';
 import { actionRoutes } from './routes/actions.js';
+import { priorityRoutes } from './routes/priorities.js';
 import { jiraOverview } from './jira/sync.js';
 import { outlookOverview } from './outlook/sync.js';
 import { teamsOverview } from './teams/sync.js';
 
-export function createApp(config, { db, store, scheduler } = {}) {
+export function createApp(config, { db, store, scheduler, reasoner = null } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
@@ -52,6 +53,7 @@ export function createApp(config, { db, store, scheduler } = {}) {
       setupHint: 'Set MS_TENANT_ID and MS_CLIENT_ID in .env, run `npm run ms:login`, then restart.',
     }));
     app.use('/actions', actionRoutes({ store }));
+    app.use('/', priorityRoutes({ store, reasoner }));
   }
 
   app.use((req, res) => res.status(404).json({ error: 'Not found' }));
