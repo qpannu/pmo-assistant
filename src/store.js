@@ -88,6 +88,11 @@ export function createStore(db) {
     return row ? { ...row, data: JSON.parse(row.data) } : null;
   }
 
+  function listItems({ source, kind }) {
+    return stmt(`SELECT * FROM items WHERE source = ? AND kind = ? ORDER BY occurred_at DESC`).all(source, kind)
+      .map((r) => ({ ...r, data: JSON.parse(r.data) }));
+  }
+
   function itemsNeedingAnalysis({ source, limit = 50 } = {}) {
     const rows = source
       ? stmt(`SELECT * FROM items WHERE analyzed_hash IS NOT content_hash AND source = ? ORDER BY updated_at LIMIT ?`).all(source, limit)
@@ -216,10 +221,11 @@ export function createStore(db) {
   }
 
   return {
+    transaction: (fn) => transaction(db, fn),
     addHistory, listHistory,
     getSyncState, saveSyncSuccess, saveSyncError,
     claimEvent, pruneProcessedEvents,
-    upsertItem, getItem, itemsNeedingAnalysis, markAnalyzed,
+    upsertItem, getItem, listItems, itemsNeedingAnalysis, markAnalyzed,
     upsertActionItem, setActionStatus, listOpenActions,
     raiseAlert, acknowledgeAlert, listActiveAlerts,
     createDraft, getDraft, listDrafts, editDraft, approveDraft, rejectDraft,

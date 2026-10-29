@@ -1,8 +1,9 @@
 import express from 'express';
 import { integrationStatus } from './config.js';
 import { logger } from './logger.js';
+import { jiraRoutes } from './routes/jira.js';
 
-export function createApp(config, { db } = {}) {
+export function createApp(config, { db, store, scheduler } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
@@ -32,6 +33,8 @@ export function createApp(config, { db } = {}) {
       integrations: integrationStatus(config),
     });
   });
+
+  if (store && scheduler) app.use('/jira', jiraRoutes({ store, scheduler }));
 
   app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 

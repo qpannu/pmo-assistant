@@ -17,6 +17,13 @@ function int(name, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER } = {}) {
   return n;
 }
 
+// Comma-separated list, e.g. "Bug, Incident" → ['Bug', 'Incident'].
+function list(name, fallback = []) {
+  const raw = str(name);
+  if (raw === '') return Object.freeze([...fallback]);
+  return Object.freeze(raw.split(',').map((s) => s.trim()).filter(Boolean));
+}
+
 export function loadConfig() {
   return Object.freeze({
     port: int('PORT', 3100, { min: 1, max: 65535 }),
@@ -30,6 +37,27 @@ export function loadConfig() {
       baseUrl: str('JIRA_BASE_URL').replace(/\/+$/, ''),
       email: str('JIRA_EMAIL'),
       apiToken: str('JIRA_API_TOKEN'),
+      // Projects to watch for production bugs and releases (keys, e.g. OS,REST).
+      // Issues assigned to / reported by / watched by me are tracked in every project.
+      projects: list('JIRA_PROJECTS'),
+      prodIssueTypes: list('JIRA_PROD_ISSUE_TYPES', ['Bug']),
+      blockerPriorities: list('JIRA_BLOCKER_PRIORITIES', ['Highest', 'High']),
+      // Optional: only count bugs carrying one of these labels as production bugs.
+      prodLabels: list('JIRA_PROD_LABELS'),
+      // A blocker-priority bug counts as a production blocker only if updated this recently.
+      prodActiveDays: int('JIRA_PROD_ACTIVE_DAYS', 30, { min: 1, max: 3650 }),
+      // An @mention counts as awaiting my reply only if it is this recent.
+      replyWindowDays: int('JIRA_REPLY_WINDOW_DAYS', 14, { min: 1, max: 365 }),
+      decisionLabels: list('JIRA_DECISION_LABELS', ['needs-decision']),
+      decisionStatuses: list('JIRA_DECISION_STATUSES'),
+      blockedStatuses: list('JIRA_BLOCKED_STATUSES', ['Blocked', 'On Hold']),
+      releaseWindowDays: int('JIRA_RELEASE_WINDOW_DAYS', 14, { min: 1, max: 365 }),
+      // Unreleased versions overdue by more than this are treated as abandoned.
+      releaseOverdueDays: int('JIRA_RELEASE_OVERDUE_DAYS', 14, { min: 0, max: 365 }),
+      fullSyncHours: int('JIRA_FULL_SYNC_HOURS', 24, { min: 1 }),
+      maxIssuesPerSync: int('JIRA_MAX_ISSUES_PER_SYNC', 1000, { min: 10, max: 5000 }),
+      // Watched issues count only if updated within this many days (0 = no limit).
+      watcherActiveDays: int('JIRA_WATCHER_ACTIVE_DAYS', 90, { min: 0, max: 3650 }),
     }),
 
     ms: Object.freeze({
