@@ -6,6 +6,7 @@ import { runReport, REPORTS } from '../reports/index.js';
 //   GET /reports/scrum?sprint=&board=      → JSON; add format=md for the text version
 //   GET /reports/releases?version=&board=
 //   GET /reports/features?feature=   (tracked list: /features)
+//   GET /reports/prod
 // Running a report records a snapshot for "since last report" comparisons.
 // Nothing here changes Jira.
 export function reportRoutes({ store, config, jiraClient, claude }) {

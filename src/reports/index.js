@@ -6,10 +6,11 @@ import { buildScrumReport, renderScrumReport } from './scrum.js';
 import { buildReleaseReport, renderReleaseReport } from './releases.js';
 import { buildFeatureReport, renderFeatureReport } from './features.js';
 import { listFeatures } from './registry.js';
+import { buildProdReport, renderProdReport } from './prod.js';
 import { refineFollowUps } from './followups.js';
 import { startOfLocalDay } from './snapshot.js';
 
-export const REPORTS = ['scrum', 'releases', 'features'];
+export const REPORTS = ['scrum', 'releases', 'features', 'prod'];
 
 export class ReportError extends Error {
   constructor(message, status = 400) {
@@ -22,7 +23,7 @@ export class ReportError extends Error {
 export async function runReport(name, { client, store, claude = null, config, now = new Date(), save = true, options = {} }) {
   if (!REPORTS.includes(name)) throw new ReportError(`Unknown report "${name}". Available: ${REPORTS.join(', ')}`, 404);
   if (!client) throw new ReportError('Jira is not configured (set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN)', 503);
-  const run = { scrum: runScrum, releases: runReleases, features: runFeatures }[name];
+  const run = { scrum: runScrum, releases: runReleases, features: runFeatures, prod: runProd }[name];
   return run({ client, store, claude, config, now, save, options });
 }
 
@@ -126,4 +127,34 @@ async function runFeatures({ client, store, claude, config, now, save, options }
   if (save && !only) store.saveReportSnapshot('features', 'registry', snapshot, now.toISOString());
 
   return { report, markdown: renderFeatureReport(report) };
+}
+
+async function runProd({ client, store, claude, config, now, save }) {
+  const p = config.reports.prod;
+  const missing = [['REPORT_PROD_PROJECT', p.project], ['REPORT_PROD_ISSUE_TYPE', p.issueType], ['REPORT_PROD_TEAM', p.team]].filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) throw new ReportError(`Set ${missing.join(', ')} in .env for the production issues report`, 400);
+
+  const scopeKey = `${p.project}:${p.issueType}:${p.team}`;
+  const prev = store.lastReportSnapshot('prod', scopeKey, startOfLocalDay(now));
+  const report = await buildProdReport({
+    client, now,
+    boardId: config.reports.boardId || null,
+    scope: { project: p.project, issueType: p.issueType, team: p.team, waitingStatuses: p.waitingStatuses },
+    previous: prev ? { takenAt: prev.taken_at, issues: prev.data.issues } : null,
+    rules: { staleDays: p.staleDays, waitingDays: p.waitingDays },
+  });
+
+  const facts = {
+    totals: report.totals, bySeverity: report.bySeverity, risks: report.risks,
+    urgent: report.urgent.slice(0, 12).map((i) => ({ key: i.key, severity: i.severity, status: i.status, owner: i.owner, ageDays: i.ageDays, idleDays: i.idleDays, waiting: i.waiting })),
+    blocked: report.blocked.slice(0, 8).map((b) => ({ key: b.key, severity: b.severity, owner: b.owner, why: b.why })),
+  };
+  const refined = await refineFollowUps({ claude, purpose: 'report:prod', facts, followUps: report.followUps });
+  report.followUps = refined.followUps;
+  report.followUpsSource = refined.source;
+
+  const snapshot = { issues: report.snapshot };
+  delete report.snapshot;
+  if (save) store.saveReportSnapshot('prod', scopeKey, snapshot, now.toISOString());
+  return { report, markdown: renderProdReport(report) };
 }

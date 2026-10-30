@@ -7,6 +7,7 @@
 //   npm run report -- releases --version POS_7.46
 //   npm run report -- features              (tracked initiatives; manage with npm run features)
 //   npm run report -- features --feature REST-247
+//   npm run report -- prod                  (production issues for REPORT_PROD_TEAM)
 // Read-only towards Jira. Safe to run while the server is running.
 
 import { config } from '../src/config.js';
