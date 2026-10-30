@@ -5,7 +5,7 @@
 
 import { truncate } from '../text.js';
 import { dayKey, zonedTimeToUtc } from '../time.js';
-import { todaysMeetings, prepHints } from '../outlook/calendar.js';
+import { todaysCalendar, prepHints } from '../outlook/calendar.js';
 import { scopeSnapshot } from '../jira/scope.js';
 import { logger } from '../logger.js';
 
@@ -91,7 +91,7 @@ function sourceStatus(store, name, enabled) {
   return { available: true, lastSync: s.last_success_at, ...(s.last_error && { warning: truncate(s.last_error, 80) }) };
 }
 
-// ─── Morning briefing (8 sections) ───────────────────────────────────────────
+// ─── Morning briefing (calendar-aware, see memory/feedback_morning_briefing_format.md) ───────────────────────────────────────────
 export async function buildMorningContext(store, report, { now = new Date(), timeZone, live = {} } = {}) {
   const links = createLinkTable();
   const items = allItems(report);
@@ -106,21 +106,29 @@ export async function buildMorningContext(store, report, { now = new Date(), tim
     teams: sourceStatus(store, 'teams', live.teamsEnabled),
   };
 
-  // 2. Meetings
+  // Calendar: meetings, free windows, who is out. `live.calendar` is the
+  // configured source (Graph or the published ICS feed).
+  const calendarSource = live.calendar ?? (live.graph && live.calendarEnabled ? ({ now: n }) => todaysCalendar(live.graph, { timeZone, now: n }) : null);
   let meetings;
-  if (!live.graph || !live.calendarEnabled) {
-    meetings = { available: false, reason: 'Outlook calendar not connected (needs Microsoft sign-in with Calendars.Read)' };
+  if (!calendarSource) {
+    meetings = { available: false, reason: 'calendar not connected — set OUTLOOK_ICS_URL (published Outlook calendar, no IT needed) or sign in to Microsoft' };
   } else {
     try {
       const waiting = report.waitingOnMe.map((i) => ({ who: i.sources.find((s) => s.system !== 'Jira')?.text.match(/from (.+?) on/)?.[1] ?? null, title: truncate(i.title, 60) }));
-      const list = await todaysMeetings(live.graph, { timeZone, now });
+      const cal = await calendarSource({ now });
       meetings = {
         available: true,
-        items: list.map((m) => ({
-          time: `${m.start}–${m.end}`, subject: truncate(m.subject, 90), organizer: m.organizer, attendees: m.attendees,
-          keyAttendees: m.keyAttendees, purpose: m.purpose ? truncate(m.purpose, 140) : 'not stated in the invite',
-          prepare: prepHints(m, { releases: releasesAtRisk(store), waiting }), link: links.ref(m.joinUrl ?? m.url),
+        items: cal.meetings.map((m) => ({
+          time: `${m.start}–${m.end}`, subject: truncate(m.subject, 90),
+          ...(m.blockedTime ? { blockedTime: true } : {
+            youOrganize: m.youOrganize, organizer: m.organizer, attendees: m.attendees, accepted: m.accepted,
+            purpose: m.purpose ? truncate(m.purpose, 140) : 'not stated in the invite',
+            prepare: prepHints(m, { releases: releasesAtRisk(store), waiting }),
+          }),
+          link: links.ref(m.joinUrl ?? m.url),
         })),
+        freeWindows: cal.freeWindows,
+        peopleOut: cal.out,
       };
     } catch (err) {
       log.warn('meetings unavailable', { error: err.message });
@@ -172,6 +180,17 @@ export async function buildMorningContext(store, report, { now = new Date(), tim
     }
   }
 
+  // Moving without you: Jira status changes since the last morning briefing,
+  // on work that isn't assigned to you (what you don't need to chase).
+  const jiraIssues = store.listItems({ source: 'jira', kind: 'issue' });
+  const prevStatus = prev?.jiraStatus;
+  const movingWithoutYou = !prevStatus ? 'first briefing: baseline recorded, changes appear from tomorrow'
+    : jiraIssues
+      .filter((r) => prevStatus[r.data.key] && prevStatus[r.data.key] !== r.data.status && !(r.data.signals ?? []).includes('assigned_to_me'))
+      .sort((a, b) => (b.occurred_at ?? '').localeCompare(a.occurred_at ?? ''))
+      .slice(0, 8)
+      .map((r) => ({ key: r.data.key, summary: truncate(r.data.summary, 80), from: prevStatus[r.data.key], to: r.data.status, owner: r.data.assignee?.name ?? 'unassigned', link: links.ref(r.url) }));
+
   const since = store.lastSentBriefing()?.sent_at ?? new Date(now - 86_400_000).toISOString();
   const omitted = report.followUps.filter((i) => !isNewOrChanged(i)).length;
 
@@ -190,11 +209,13 @@ export async function buildMorningContext(store, report, { now = new Date(), tim
     overdue,
     projects: projectRisks(report),
     changesSinceLastBriefing: changesSince(store, since),
+    movingWithoutYou,
     unchangedFollowUpsOmitted: omitted,
   };
   const snapshot = {
     items: Object.fromEntries(items.map((i) => [i.id, i.score])),
     releases: Object.fromEntries(releaseItems.map((r) => [r.data.id, r.data.issueKeys ?? []])),
+    jiraStatus: Object.fromEntries(jiraIssues.filter((r) => r.data.tracked).map((r) => [r.data.key, r.data.status])),
   };
   return { context, links, snapshot };
 }

@@ -194,8 +194,8 @@ describe('resilience', () => {
     const r = await (await post('/briefings/morning/run')).json();
     assert.equal(r.method, 'rules-fallback');
     assert.equal(claudeFake.calls.length, 0);
-    assert.match(r.content, /1\. Today's priorities/);
-    assert.match(r.content, /8\. Recommended focus/);
+    assert.match(r.content, /Top 3 today/);
+    assert.match(r.content, /Suggested order/);
     assert.equal(r.sent, true);
   });
 

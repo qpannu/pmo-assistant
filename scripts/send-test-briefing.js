@@ -14,6 +14,7 @@ import { syncActions } from '../src/actions.js';
 import { createClaude } from '../src/claude/client.js';
 import { createTeamsNotifier } from '../src/notify/teams.js';
 import { createBriefingService } from '../src/briefing/briefing.js';
+import { createIcsCalendarSource } from '../src/outlook/calendar.js';
 
 setLogLevel('warn');
 const kind = process.argv[2] ?? 'morning';
@@ -31,9 +32,12 @@ const claude = createClaude({
   enabled: config.claudeEnabled, dailyCallLimit: config.claudeDailyCallLimit,
 });
 const notifier = createTeamsNotifier({ webhookUrl: config.teamsWebhookUrl });
+const calendar = config.outlookIcsUrl
+  ? createIcsCalendarSource({ url: config.outlookIcsUrl, timeZone: config.briefingTimeZone, myEmails: [config.myEmail] })
+  : null;
 const briefings = createBriefingService({
   store, claude, notifier, timeZone: config.briefingTimeZone,
-  live: { jiraClient, scopes: config.pmoScopes, jiraEnabled: Boolean(jiraClient) },
+  live: { jiraClient, scopes: config.pmoScopes, jiraEnabled: Boolean(jiraClient), calendar },
 });
 
 const r = await briefings.run(kind, { force: true });

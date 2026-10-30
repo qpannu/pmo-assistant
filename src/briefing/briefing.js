@@ -21,16 +21,14 @@ Use only the data provided. When a section's data is unavailable or empty, write
 Format: short bold section headings and "- " bullets, no tables, no greeting or sign-off. Link items as [label](L3) using the link ids given in the data.`;
 
 const INSTRUCTIONS = {
-  morning: `Write today's morning briefing with exactly these sections, in order:
-**1. Today's priorities** — the top three actions (use "priorities"), each with why and the next step.
-**2. Meetings** — time, title, purpose, key attendees, what to prepare (use "meetings"; say what's missing).
-**3. Pending on you** — emails, Teams messages, Jira items, decisions, approvals (use "pending"; list sources that aren't connected).
-**4. Production issues** — open critical bugs/blockers, owner, required action.
-**5. Releases** — upcoming releases: date, risk, blockers, scope changes since the last briefing.
-**6. ezCater** — status from "scopes.ezCater": counts by status, blocked items, unassigned, overdue, risks.
-**7. Overdue** — commitments and follow-ups past due.
-**8. Recommended focus** — one or two sentences: what to do first and why.
-Skip items that are unchanged since yesterday unless still critical; mention how many unchanged follow-ups were omitted. Aim for under 350 words.`,
+  // Shape requested by the user (memory/feedback_morning_briefing_format.md).
+  morning: `Write today's morning briefing like a chief of staff, with these sections in order:
+**📅 Calendar** — each meeting as "time — title" with whether I organize and who accepted; blocked appointments as "Blocked"; then "Free:" with the free windows and "Out today:" with people out. If the calendar isn't available, say so in one line.
+**🔴 Top 3 today** — the three things that matter most. Use "priorities", and pull in production issues, releases and "scopes" (e.g. ezCater) where they belong. For each: what changed since yesterday (from "movingWithoutYou" / "changesSinceLastBriefing"), the decisions I owe, and the link to today's meetings (e.g. "prep for the 11:00 touchpoint"). Short sub-bullets are fine.
+**💬 Still waiting on you** — "Person: what they need", most important first (use "pending"); name sources that aren't connected.
+**✅ Moving without you** — progress others made since the last briefing, so I don't chase it (use "movingWithoutYou"). Skip the section if there's nothing.
+**➡️ Suggested order** — one or two lines mapping the top items onto today's free windows.
+Bullets only (no tables). Don't repeat unchanged low-priority items. Aim for under 350 words.`,
   midday: `Write a midday update covering only what changed since the morning: new urgent items, items resolved, and whether the top priorities still hold. Under 120 words.`,
   eod: `Write an end-of-day summary: what got closed today, what is still open that matters tomorrow (with the next step), and anything due tomorrow. Under 180 words.`,
 };
@@ -42,24 +40,39 @@ const missing = (reason) => `- Not available: ${reason}`;
 export function rulesBriefing(ctx) {
   const out = [];
   if (ctx.kind === 'morning') {
-    out.push('**1. Today\'s priorities**', ...(ctx.priorities.length ? ctx.priorities.map(line) : ['- Nothing open.']));
-    out.push('', '**2. Meetings**', ...(ctx.meetings.available
-      ? (ctx.meetings.items.length ? ctx.meetings.items.map((m) => `- ${m.time} ${m.link ? `[${m.subject}](${m.link})` : m.subject}${m.prepare.length ? ` — ${m.prepare.join('; ')}` : ''}`) : ['- No meetings today.'])
-      : [missing(ctx.meetings.reason)]));
-    out.push('', '**3. Pending on you**', ...(ctx.pending.items.length ? ctx.pending.items.map(line) : ['- Nothing waiting on you in connected sources.']), ...ctx.pending.missing.map(missing));
-    out.push('', '**4. Production issues**', ...(ctx.production.length ? ctx.production.map((p) => `${line(p)} (owner: ${p.owner})`) : ['- No open production blockers in tracked projects.']));
-    out.push('', '**5. Releases**', ...(ctx.releases.length
-      ? ctx.releases.map((r) => `- ${r.link ? `[${r.release}](${r.link})` : r.release} (${r.date}, ${r.risk}): ${r.reasons[0] ?? `${r.openIssues} open`}${Array.isArray(r.scopeChange?.added) && r.scopeChange.added.length ? `; added ${r.scopeChange.added.join(', ')}` : ''}`)
-      : ['- No upcoming releases in the release window.']));
+    const cal = ctx.meetings;
+    out.push('**📅 Calendar**', ...(cal.available
+      ? [
+        ...(cal.items.length ? cal.items.map((m) => (m.blockedTime
+          ? `- ${m.time} — Blocked (${m.subject})`
+          : `- ${m.time} — ${m.link ? `[${m.subject}](${m.link})` : m.subject}${m.youOrganize ? ' (you organize)' : ''}${m.accepted?.length ? ` — accepted: ${m.accepted.slice(0, 5).join(', ')}` : ''}${m.prepare?.length ? ` — ${m.prepare.join('; ')}` : ''}`))
+          : ['- No meetings today.']),
+        ...(cal.freeWindows?.length ? [`- Free: ${cal.freeWindows.join(', ')}`] : []),
+        ...(cal.peopleOut?.length ? [`- Out today: ${cal.peopleOut.join(', ')}`] : []),
+      ]
+      : [missing(cal.reason)]));
+
+    out.push('', '**🔴 Top 3 today**', ...(ctx.priorities.length ? ctx.priorities.map(line) : ['- Nothing open.']));
     const ez = ctx.scopes.ezCater;
-    out.push('', '**6. ezCater**', ...(!ez ? [missing('no ezCater scope configured (PMO_SCOPES)')] : !ez.available ? [missing(ez.reason)]
-      : [`- ${ez.total} open: ${Object.entries(ez.byStatus).slice(0, 4).map(([s, n]) => `${n} ${s}`).join(', ')}`,
-        `- Blocked: ${ez.blocked.length}, unassigned: ${ez.unassigned}, overdue: ${ez.overdue.length}`,
-        ...ez.blocked.slice(0, 3).map((b) => `- ${b.link ? `[${b.key}](${b.link})` : b.key} blocked${b.blockedBy.length ? ` by ${b.blockedBy.join(', ')}` : ''} (${b.owner})`)]));
-    out.push('', '**7. Overdue**', ...(ctx.overdue.length ? ctx.overdue.map(line) : ['- Nothing new overdue.']));
+    const radar = [
+      ...(ctx.production.length ? [`- ${ctx.production.length} production blocker(s): ${ctx.production.slice(0, 3).map((p) => `${p.title.match(/[A-Z]+-\d+/)?.[0] ?? p.title} (${p.owner})`).join(', ')}`] : []),
+      ...ctx.releases.filter((r) => r.risk !== 'none').slice(0, 3).map((r) => `- ${r.link ? `[${r.release}](${r.link})` : r.release}: ${r.reasons[0] ?? r.risk}`),
+      ...(ez?.available ? [`- ezCater: ${ez.total} open, ${ez.blocked.length} blocked, ${ez.unassigned} unassigned`] : ez ? [missing(`ezCater — ${ez.reason}`)] : []),
+    ];
+    if (radar.length) out.push('', '**Also on your radar**', ...radar);
+
+    out.push('', '**💬 Still waiting on you**', ...(ctx.pending.items.length ? ctx.pending.items.map(line) : ['- Nothing waiting on you in connected sources.']), ...ctx.pending.missing.map(missing));
+    const overdue = ctx.overdue.filter((o) => !ctx.pending.items.some((p) => p.id === o.id));
+    if (overdue.length) out.push(...overdue.slice(0, 4).map(line));
     if (ctx.unchangedFollowUpsOmitted) out.push(`- ${ctx.unchangedFollowUpsOmitted} unchanged follow-up(s) omitted`);
+
+    out.push('', '**✅ Moving without you**', ...(typeof ctx.movingWithoutYou === 'string' ? [`- ${ctx.movingWithoutYou}`]
+      : ctx.movingWithoutYou.length ? ctx.movingWithoutYou.map((m) => `- ${m.link ? `[${m.key}](${m.link})` : m.key} ${m.summary}: ${m.from} → ${m.to} (${m.owner})`)
+        : ['- No status changes on others\' work since the last briefing.']));
+
     const first = ctx.priorities[0];
-    out.push('', '**8. Recommended focus**', first ? `Start with ${first.title}: ${first.why[0] ?? ''}. Next: ${first.next}` : 'No urgent items.');
+    const window = cal.available ? cal.freeWindows?.[0] : null;
+    out.push('', '**➡️ Suggested order**', first ? `${window ? `In ${window}: ` : 'First: '}${first.title} — ${first.next}` : 'No urgent items.');
   } else if (ctx.kind === 'midday') {
     const c = ctx.changesSinceMorning;
     if (!hasChanges(c)) out.push('No changes since the morning briefing.');

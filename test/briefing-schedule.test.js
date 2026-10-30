@@ -8,6 +8,7 @@ import { createBriefingService } from '../src/briefing/briefing.js';
 import { createTeamsNotifier } from '../src/notify/teams.js';
 import { createClaude } from '../src/claude/client.js';
 import { dayKey, zonedParts, zonedTimeToUtc } from '../src/time.js';
+import { freeWindows, todaysCalendar } from '../src/outlook/calendar.js';
 import { seedSample } from './fixtures/sample-data.js';
 
 setLogLevel('error');
@@ -100,7 +101,7 @@ describe('duplicate prevention and recovery', () => {
     assert.equal(text(posts[0]), text(posts.at(-1)), 'identical briefing text re-sent, not regenerated');
   });
 
-  test('briefing contains all 8 sections and marks missing sources', async () => {
+  test('briefing has the requested sections, in order, and marks missing sources', async () => {
     const store = createStore(openDb(':memory:'));
     seedSample(store, NOW);
     const hook = okWebhook();
@@ -110,11 +111,14 @@ describe('duplicate prevention and recovery', () => {
       live: { jiraEnabled: true, scopes: { ezCater: 'project = X' } },
     });
     const r = await svc.run('morning', { now: NOW });
-    for (const h of ["1. Today's priorities", '2. Meetings', '3. Pending on you', '4. Production issues', '5. Releases', '6. ezCater', '7. Overdue', '8. Recommended focus']) {
-      assert.ok(r.content.includes(h), h);
-    }
-    assert.match(r.content, /Not available: Outlook calendar not connected/);
-    assert.match(r.content, /6\. ezCater\*\*\n- Not available: Jira not configured/);
+    const order = ['📅 Calendar', '🔴 Top 3 today', '💬 Still waiting on you', '✅ Moving without you', '➡️ Suggested order'];
+    const positions = order.map((h) => r.content.indexOf(h));
+    assert.ok(positions.every((p) => p >= 0), `all sections present: ${positions}`);
+    assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'in the requested order');
+    assert.ok(!/\n\|/.test(r.content), 'no markdown tables (Teams cards do not render them)');
+    assert.match(r.content, /Not available: calendar not connected — set OUTLOOK_ICS_URL/);
+    assert.match(r.content, /Not available: ezCater — Jira not configured/);
+    assert.match(r.content, /first briefing: baseline recorded/);
     assert.match(r.content, /\]\(https:\/\/example\.atlassian\.net\/browse\/REST-900\)/, 'links restored');
     assert.match(hook.posts[0].attachments[0].content.body[0].text, /Morning briefing — Thu, Oct 29/);
   });
@@ -132,5 +136,58 @@ describe('duplicate prevention and recovery', () => {
     assert.equal(day2.sent, true);
     assert.doesNotMatch(day2.content, /No reply yet: Dev portal access/, 'unchanged low-priority item omitted');
     assert.match(day2.content, /unchanged follow-up\(s\) omitted/);
+  });
+
+  test('"moving without you" lists status changes on others\' work since the last briefing', async () => {
+    const store = createStore(openDb(':memory:'));
+    seedSample(store, NOW);
+    const svc = createBriefingService({
+      store, claude: createClaude({ store, model: 'm', enabled: false }),
+      notifier: createTeamsNotifier({ webhookUrl: 'https://x.example/hook', fetchImpl: okWebhook().fetchImpl }), timeZone: TZ,
+    });
+    await svc.run('morning', { now: NOW });
+
+    // Overnight: Ben moves REST-900 to Code Review; REST-902 (mine) also moves but isn't "without me".
+    for (const key of ['REST-900', 'REST-902']) {
+      const item = store.listItems({ source: 'jira', kind: 'issue' }).find((i) => i.data.key === key);
+      store.upsertItem({ source: 'jira', externalId: item.external_id, kind: 'issue', title: item.title, url: item.url, project: item.project,
+        occurredAt: item.occurred_at, data: { ...item.data, status: 'Code Review' } });
+    }
+    const next = await svc.run('morning', { now: at('2026-10-30T11:00:00Z') });
+    assert.match(next.content, /\[REST-900\]\(https:\/\/example\.atlassian\.net\/browse\/REST-900\) Online orders.*: Dev in Progress → Code Review \(Ben\)/);
+    assert.doesNotMatch(next.content, /REST-902[^\n]*→ Code Review/, 'my own work is not "moving without me"');
+  });
+});
+
+describe('calendar', () => {
+  test('free windows between meetings in the working day', () => {
+    assert.deepEqual(freeWindows([{ start: '11:00', end: '11:30' }, { start: '12:30', end: '14:00' }, { start: '16:00', end: '18:00' }]),
+      ['08:00–11:00', '11:30–12:30', '14:00–16:00']);
+    assert.deepEqual(freeWindows([{ start: '08:00', end: '18:00' }]), []);
+    assert.deepEqual(freeWindows([{ start: '09:00', end: '09:20' }, { start: '09:30', end: '10:00' }]), ['08:00–09:00', '10:00–18:00'], 'short gaps skipped');
+  });
+
+  test('meetings, blocked time, people out and free windows from Graph', async () => {
+    const ev = (o) => ({ isCancelled: false, showAs: 'busy', isAllDay: false, responseStatus: { response: 'organizer' }, attendees: [], ...o });
+    const graph = {
+      collect: async (url, { query, headers }) => {
+        assert.equal(url, '/me/calendarView');
+        assert.equal(query.startDateTime, '2026-10-30T04:00:00.000Z', 'midnight Eastern');
+        assert.match(headers.Prefer, /America\/New_York/);
+        return { items: [
+          ev({ subject: 'Sowjanya-PTO', isAllDay: true, showAs: 'free', start: { dateTime: '2026-10-30T00:00:00' }, end: { dateTime: '2026-10-31T00:00:00' } }),
+          ev({ subject: 'ezCater - Touchpoint meeting', isOrganizer: true, start: { dateTime: '2026-10-30T11:00:00' }, end: { dateTime: '2026-10-30T11:30:00' },
+            attendees: [{ type: 'required', emailAddress: { name: 'Benjamin Roedell' }, status: { response: 'accepted' } }, { type: 'required', emailAddress: { name: 'Zohra' }, status: { response: 'none' } }] }),
+          ev({ subject: 'Appointment', isOrganizer: true, start: { dateTime: '2026-10-30T12:30:00' }, end: { dateTime: '2026-10-30T14:00:00' } }),
+          ev({ subject: 'Declined thing', responseStatus: { response: 'declined' }, start: { dateTime: '2026-10-30T09:00:00' }, end: { dateTime: '2026-10-30T10:00:00' } }),
+        ] };
+      },
+    };
+    const cal = await todaysCalendar(graph, { timeZone: TZ, now: at('2026-10-30T11:00:00Z') });
+    assert.deepEqual(cal.out, ['Sowjanya']);
+    assert.equal(cal.meetings.length, 2);
+    assert.deepEqual(cal.meetings[0].accepted, ['Benjamin Roedell']);
+    assert.equal(cal.meetings[1].blockedTime, true);
+    assert.deepEqual(cal.freeWindows, ['08:00–11:00', '11:30–12:30', '14:00–18:00']);
   });
 });

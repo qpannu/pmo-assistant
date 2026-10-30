@@ -359,7 +359,7 @@ Before relying on it daily:
 | Piece | Mechanism | Needs |
 |---|---|---|
 | Briefing delivery | Teams Workflow webhook → your private chat with the Workflows bot | `TEAMS_WEBHOOK_URL` |
-| Meetings section | Graph `GET /me/calendarView` | Entra app + **Calendars.Read** |
+| Calendar section | Graph `GET /me/calendarView`, or else your published Outlook calendar (ICS) | Entra app + **Calendars.Read**, or `OUTLOOK_ICS_URL` (no IT) |
 | Receiving your chat messages | Graph polls one chat every 20 s (`GET /chats/{id}/messages`) | Entra app + **Chat.Read** |
 | Replies (default) | Same Workflow webhook → same Workflows chat | nothing extra |
 | Replies (alternative) | Graph `POST /chats/{id}/messages`, only to `TEAMS_CHAT_ID` | **ChatMessage.Send** |
@@ -372,10 +372,15 @@ one chat with delegated `Chat.Read` avoids both, runs on your Mac, and costs not
 
 1. **Teams webhook** (no IT needed): Teams → Workflows → "Send webhook alerts to a chat" →
    post as Flow bot in your chat with Flow bot → copy the URL into `TEAMS_WEBHOOK_URL`.
-2. **Entra app (IT):** add delegated **Calendars.Read** to the permissions listed above
+2. **Calendar without IT:** Outlook on the web → Settings → Calendar → Shared calendars →
+   Publish a calendar → your calendar, *Can view all details* → Publish → copy the **ICS** link
+   into `OUTLOOK_ICS_URL` in `.env`. Recurring meetings, moved/cancelled occurrences, time zones
+   and all-day PTO are handled; the feed is fetched at most every 10 minutes. Revoke it any time
+   with *Reset links* on the same page.
+3. **Entra app (IT):** add delegated **Calendars.Read** to the permissions listed above
    (User.Read, offline_access, Mail.Read, Chat.Read). Add **ChatMessage.Send** only if you want
    reply mode `graph`. Put `MS_TENANT_ID` / `MS_CLIENT_ID` in `.env`, then `npm run ms:login`.
-3. **Pick the chat:** type `hello` in your Workflows bot chat, then
+4. **Pick the chat:** type `hello` in your Workflows bot chat, then
    `npm run chat:setup` (lists chats) and `npm run chat:setup -- <chatId>` (confirms your
    message is visible). Set `TEAMS_CHAT_ID`.
    If Teams doesn't let you type in the Workflows chat, use your "notes to self" chat (or any

@@ -39,15 +39,27 @@ export function assertTimeZone(tz) {
   }
 }
 
-// UTC instant of a wall-clock time on the zoned day of `date` (DST-aware).
-export function zonedTimeToUtc(date, tz, hour, minute) {
-  const p = zonedParts(date, tz);
-  let guess = Date.UTC(p.year, p.month - 1, p.day, hour, minute);
+// UTC instant of a wall-clock date/time in `tz` (DST-aware).
+export function wallTimeToUtc(year, month, day, hour, minute, tz, second = 0) {
+  const target = Date.UTC(year, month - 1, day, hour, minute, second);
+  let guess = target;
   for (let i = 0; i < 3; i++) {
     const g = zonedParts(new Date(guess), tz);
-    const diff = (Date.UTC(g.year, g.month - 1, g.day, g.hour, g.minute) - Date.UTC(p.year, p.month - 1, p.day, hour, minute));
+    const diff = Date.UTC(g.year, g.month - 1, g.day, g.hour, g.minute, second) - target;
     if (diff === 0) break;
     guess -= diff;
   }
   return new Date(guess);
+}
+
+// UTC instant of a wall-clock time on the zoned day of `date` (DST-aware).
+export function zonedTimeToUtc(date, tz, hour, minute) {
+  const p = zonedParts(date, tz);
+  return wallTimeToUtc(p.year, p.month, p.day, hour, minute, tz);
+}
+
+// Wall-clock HH:MM of an instant in `tz`.
+export function zonedHHMM(date, tz) {
+  const p = zonedParts(date, tz);
+  return `${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
 }

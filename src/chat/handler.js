@@ -57,7 +57,7 @@ function draftReply(draft, method) {
   ].filter((x) => x !== null).join('\n');
 }
 
-export function createChatHandler({ store, claude, config, jiraClient = null, scheduler = null }) {
+export function createChatHandler({ store, claude, config, jiraClient = null, scheduler = null, calendar = null }) {
   // Pull a fresh incremental Jira sync if the data is older than a few minutes.
   async function ensureFresh() {
     if (!scheduler?.has('jira')) return;
@@ -166,8 +166,19 @@ export function createChatHandler({ store, claude, config, jiraClient = null, sc
     const missingScopes = unknownTeam && !Object.keys(scopes).length
       ? [`No Jira scope is configured for "${unknownTeam[0]}". Add it to PMO_SCOPES as {"${unknownTeam[0]}": "<JQL>"}.`] : [];
 
+    let today = { available: false, reason: 'calendar not connected (OUTLOOK_ICS_URL)' };
+    if (calendar) {
+      try {
+        const cal = await calendar({ now });
+        today = { available: true, meetings: cal.meetings.map((m) => ({ time: `${m.start}–${m.end}`, subject: truncate(m.subject, 80), blocked: m.blockedTime || undefined, youOrganize: m.youOrganize || undefined })), free: cal.freeWindows, out: cal.out };
+      } catch (err) {
+        today = { available: false, reason: `calendar feed failed: ${truncate(err.message, 80)}` };
+      }
+    }
+
     const data = {
       now: now.toISOString(),
+      calendarToday: today,
       dataFreshness: Object.fromEntries(['jira', 'outlook', 'teams'].map((s) => [s, store.getSyncState(s)?.last_success_at ?? 'not connected'])),
       counts: report.counts,
       topPriorities: items.slice(0, 5).map((i) => compactItem(i, links)),

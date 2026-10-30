@@ -23,6 +23,7 @@ import { createChatHandler } from './chat/handler.js';
 import { createChatListener } from './chat/listener.js';
 import { createChatSender } from './microsoft/chatSend.js';
 import { assertTimeZone } from './time.js';
+import { createIcsCalendarSource, todaysCalendar } from './outlook/calendar.js';
 
 setLogLevel(config.logLevel);
 assertTimeZone(config.briefingTimeZone);
@@ -98,6 +99,18 @@ if (integrations.microsoft) {
   logger.info('microsoft not configured; skipping Outlook, Teams, calendar and Teams chat (set MS_TENANT_ID, MS_CLIENT_ID)');
 }
 
+// Calendar: Graph when signed in (richer: attendees, responses), otherwise the
+// published Outlook ICS feed, which needs no IT approval.
+let calendarSource = null;
+if (graph && config.ms.calendarEnabled) {
+  calendarSource = ({ now }) => todaysCalendar(graph, { timeZone: config.briefingTimeZone, now });
+} else if (config.outlookIcsUrl) {
+  calendarSource = createIcsCalendarSource({ url: config.outlookIcsUrl, timeZone: config.briefingTimeZone, myEmails: [config.myEmail] });
+  logger.info('calendar: using the published Outlook calendar feed');
+} else {
+  logger.warn('calendar not connected: set OUTLOOK_ICS_URL (see README) or sign in to Microsoft');
+}
+
 const briefings = createBriefingService({
   store, claude, notifier,
   timeZone: config.briefingTimeZone,
@@ -107,6 +120,7 @@ const briefings = createBriefingService({
     outlookEnabled: Boolean(graph && config.ms.outlookEnabled),
     teamsEnabled: Boolean(graph && config.ms.teamsEnabled),
     calendarEnabled: Boolean(graph && config.ms.calendarEnabled),
+    calendar: calendarSource,
   },
 });
 
@@ -116,7 +130,7 @@ if (config.teamsChat.chatId) {
   if (!graph) {
     logger.warn('TEAMS_CHAT_ID is set but Microsoft is not signed in; Teams chat is off until `npm run ms:login` and a restart');
   } else {
-    const handler = createChatHandler({ store, claude, config, jiraClient, scheduler });
+    const handler = createChatHandler({ store, claude, config, jiraClient, scheduler, calendar: calendarSource });
     const reply = config.teamsChat.replyMode === 'graph'
       ? createChatSender(msAuth, config.teamsChat.chatId)
       : (text) => notifier.send({ title: '🤖 PMO Assistant', body: text }).then((r) => {

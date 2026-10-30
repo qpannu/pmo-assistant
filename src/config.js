@@ -63,7 +63,7 @@ export function loadConfig() {
     teamsWebhookUrl: str('TEAMS_WEBHOOK_URL'),
     // Wall-clock times in BRIEFING_TIMEZONE; leave a time empty to turn that briefing off.
     briefingTimes: Object.freeze({
-      morning: str('BRIEFING_MORNING', '07:00'),
+      morning: process.env.BRIEFING_MORNING === '' ? '' : str('BRIEFING_MORNING', '07:00'),
       midday: process.env.BRIEFING_MIDDAY === '' ? '' : str('BRIEFING_MIDDAY', '12:30'),
       eod: process.env.BRIEFING_EOD === '' ? '' : str('BRIEFING_EOD', '17:30'),
     }),
@@ -75,6 +75,10 @@ export function loadConfig() {
 
     // Named Jira scopes the briefing and chat can report on, as JSON: {"ezCater": "<JQL>", ...}.
     pmoScopes: parseScopes(str('PMO_SCOPES')),
+    // Published Outlook calendar (ICS link): calendar without Graph/IT. Secret-ish — keep in .env.
+    outlookIcsUrl: str('OUTLOOK_ICS_URL'),
+    // Your email(s), to recognise meetings you organize in the calendar feed.
+    myEmail: str('MY_EMAIL') || str('JIRA_EMAIL'),
     myManager: Object.freeze({ name: str('MY_MANAGER_NAME'), email: str('MY_MANAGER_EMAIL') }),
 
     // Two-way Teams chat: the chat the assistant listens to, and how it replies.
