@@ -38,7 +38,9 @@
     "prereport": "node scripts/check-node.cjs",
     "report": "node --env-file-if-exists=.env scripts/report.js",
     "prefeatures": "node scripts/check-node.cjs",
-    "features": "node --env-file-if-exists=.env scripts/features.js"
+    "features": "node --env-file-if-exists=.env scripts/features.js",
+    "prerisk": "node scripts/check-node.cjs",
+    "risk": "node --env-file-if-exists=.env scripts/risk.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

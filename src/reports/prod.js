@@ -5,6 +5,7 @@
 // count. Facts are computed here; risks and follow-ups are rule-based
 // inferences and labelled as such. Read-only.
 
+import { followUpLine, learningLines } from './learning.js';
 import { truncate } from '../text.js';
 import { loadBoard, toWorkItem, blockReasons, daysBetween } from './board.js';
 
@@ -243,7 +244,8 @@ export function renderProdReport(rep) {
   if (rep.changes) {
     const c = rep.changes;
     const bits = [
-      c.added.length && `new: ${c.added.join(', ')}`,
+      c.added.length && `new: ${c.added.filter((k) => !(c.reopened ?? []).includes(k)).join(', ') || '—'}`,
+      c.reopened?.length && `↩ reopened (resolved earlier, open again): ${c.reopened.join(', ')}`,
       c.resolved.length && `resolved: ${c.resolved.join(', ')}`,
       c.leftOther.length && `no longer in scope: ${c.leftOther.join(', ')}`,
       c.severity.length && `severity: ${c.severity.map((x) => `${x.key} ${x.from ?? 'none'} → ${x.to ?? 'none'}`).join('; ')}`,
@@ -283,6 +285,7 @@ export function renderProdReport(rep) {
   for (const r of rep.risks) lines.push(`- Risk: ${r}`);
   lines.push('', `**➡️ Recommended follow-ups**${rep.followUpsSource === 'claude' ? ' (prioritised by Claude from the facts above)' : ' (rule-based)'}`);
   if (!rep.followUps.length) lines.push('- Nothing needs your attention');
-  for (const f of rep.followUps) lines.push(`- ${f.text}`);
+  for (const f of rep.followUps) lines.push(followUpLine(f));
+  lines.push(...learningLines(rep.learning, { recurring: rep.recurring ?? [], days: rep.recurrenceDays }));
   return lines.join('\n');
 }

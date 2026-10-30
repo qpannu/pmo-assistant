@@ -9,6 +9,15 @@ import { listFeatures } from './registry.js';
 import { buildProdReport, renderProdReport } from './prod.js';
 import { refineFollowUps } from './followups.js';
 import { startOfLocalDay } from './snapshot.js';
+import { loadLearningRules, applyLearning, recurringBlockers, reopened } from './learning.js';
+
+// Feedback, weights and repeat-collapsing for one list of follow-ups (see learning.js).
+function learn(store, config, report, followUps, { now, save }) {
+  const rules = loadLearningRules(config.reports.rulesFile);
+  const out = applyLearning({ store, report, followUps, rules, now, save });
+  const { followUps: shown, ...rest } = out;
+  return { followUps: shown, learning: { ...rest, rulesSource: rules.source, rulesError: rules.error ?? null }, rules };
+}
 
 export const REPORTS = ['scrum', 'releases', 'features', 'prod'];
 
@@ -44,7 +53,12 @@ async function runScrum({ client, store, claude, config, now, save, options }) {
     rules: { staleDays: config.reports.staleDays, carryoverSprints: config.reports.carryoverSprints },
   });
 
+  let rules;
   for (const s of report.sprints) {
+    const l = learn(store, config, 'scrum', s.followUps, { now, save: save && !options.sprint });
+    s.followUps = l.followUps;
+    s.learning = l.learning;
+    rules = l.rules;
     const facts = {
       sprint: s.name, end: s.end?.slice(0, 10), daysLeft: s.daysLeft, health: s.health,
       byPhase: s.byPhase, donePct: s.donePct,
@@ -60,6 +74,8 @@ async function runScrum({ client, store, claude, config, now, save, options }) {
   for (const s of report.sprints) delete s.snapshot;
   // A filtered run covers only some sprints; saving it would hide the others from tomorrow's diff.
   if (save && !options.sprint && report.sprints.length) store.saveReportSnapshot('scrum', boardId, snapshot, now.toISOString());
+  report.recurring = rules ? recurringBlockers({ store, report: 'scrum', scope: boardId, now, rules }) : [];
+  report.recurrenceDays = rules?.recurrenceDays;
 
   return { report, markdown: renderScrumReport(report) };
 }
@@ -83,7 +99,9 @@ async function runReleases({ client, store, claude, config, now, save, options }
       urgentBugs: x.urgentBugs.slice(0, 3).map((b) => ({ key: b.key, owner: b.owner, priority: b.priority })),
     })),
   };
-  const refined = await refineFollowUps({ claude, purpose: 'report:releases', facts, followUps: report.followUps });
+  const lr = learn(store, config, 'releases', report.followUps, { now, save: save && !options.version });
+  report.learning = lr.learning;
+  const refined = await refineFollowUps({ claude, purpose: 'report:releases', facts, followUps: lr.followUps });
   report.followUps = refined.followUps;
   report.followUpsSource = refined.source;
 
@@ -91,6 +109,8 @@ async function runReleases({ client, store, claude, config, now, save, options }
   const snapshot = { versions: Object.fromEntries(all.map((x) => [x.name, { releaseDate: x.releaseDate, issues: x.snapshot }])) };
   for (const x of all) delete x.snapshot;
   if (save && !options.version && all.length) store.saveReportSnapshot('releases', boardId, snapshot, now.toISOString());
+  report.recurring = recurringBlockers({ store, report: 'releases', scope: boardId, now, rules: lr.rules });
+  report.recurrenceDays = lr.rules.recurrenceDays;
 
   return { report, markdown: renderReleaseReport(report) };
 }
@@ -117,7 +137,9 @@ async function runFeatures({ client, store, claude, config, now, save, options }
     epics: f.epics.filter((e) => e.flags.length).map((e) => ({ key: e.key, owner: e.owner, flags: e.flags })),
     blockers: f.blockers.slice(0, 5).map((b) => ({ key: b.key, owner: b.owner, why: b.why })),
   }));
-  const refined = await refineFollowUps({ claude, purpose: 'report:features', facts, followUps: report.followUps });
+  const lf = learn(store, config, 'features', report.followUps, { now, save: save && !only });
+  report.learning = lf.learning;
+  const refined = await refineFollowUps({ claude, purpose: 'report:features', facts, followUps: lf.followUps });
   report.followUps = refined.followUps;
   report.followUpsSource = refined.source;
 
@@ -125,6 +147,8 @@ async function runFeatures({ client, store, claude, config, now, save, options }
   const snapshot = { features: Object.fromEntries(report.features.map((f) => [f.key, f.snapshot])) };
   for (const f of report.features) delete f.snapshot;
   if (save && !only) store.saveReportSnapshot('features', 'registry', snapshot, now.toISOString());
+  report.recurring = recurringBlockers({ store, report: 'features', scope: 'registry', now, rules: lf.rules });
+  report.recurrenceDays = lf.rules.recurrenceDays;
 
   return { report, markdown: renderFeatureReport(report) };
 }
@@ -149,12 +173,17 @@ async function runProd({ client, store, claude, config, now, save }) {
     urgent: report.urgent.slice(0, 12).map((i) => ({ key: i.key, severity: i.severity, status: i.status, owner: i.owner, ageDays: i.ageDays, idleDays: i.idleDays, waiting: i.waiting })),
     blocked: report.blocked.slice(0, 8).map((b) => ({ key: b.key, severity: b.severity, owner: b.owner, why: b.why })),
   };
-  const refined = await refineFollowUps({ claude, purpose: 'report:prod', facts, followUps: report.followUps });
+  const lp = learn(store, config, 'prod', report.followUps, { now, save });
+  report.learning = lp.learning;
+  if (report.changes) report.changes.reopened = reopened({ store, report: 'prod', scope: scopeKey, keys: report.changes.added, now, rules: lp.rules });
+  const refined = await refineFollowUps({ claude, purpose: 'report:prod', facts, followUps: lp.followUps });
   report.followUps = refined.followUps;
   report.followUpsSource = refined.source;
 
   const snapshot = { issues: report.snapshot };
   delete report.snapshot;
   if (save) store.saveReportSnapshot('prod', scopeKey, snapshot, now.toISOString());
+  report.recurring = recurringBlockers({ store, report: 'prod', scope: scopeKey, now, rules: lp.rules });
+  report.recurrenceDays = lp.rules.recurrenceDays;
   return { report, markdown: renderProdReport(report) };
 }

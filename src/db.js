@@ -211,6 +211,28 @@ const MIGRATIONS = [
     removed_at  TEXT                 -- NULL while tracked
   );
   `,
+
+  // 8 — every risk/follow-up a report raised, how often, and my verdict on it
+  `
+  CREATE TABLE risk_items (
+    ref                 TEXT PRIMARY KEY,     -- short id shown in reports, e.g. a1b2c3
+    risk_id             TEXT NOT NULL UNIQUE, -- report:rule:keys
+    report              TEXT NOT NULL,
+    rule                TEXT NOT NULL,
+    keys                TEXT,                 -- JSON array of Jira keys
+    text                TEXT NOT NULL,        -- latest wording
+    fingerprint         TEXT NOT NULL,        -- the facts behind it; changes when Jira changes
+    first_seen          TEXT NOT NULL,
+    last_seen           TEXT NOT NULL,
+    times_seen          INTEGER NOT NULL DEFAULT 1,
+    changed_at          TEXT NOT NULL,
+    verdict             TEXT CHECK (verdict IN ('valid','dismissed','resolved')),
+    verdict_note        TEXT,
+    verdict_fingerprint TEXT,                 -- facts at the time of the verdict
+    verdict_at          TEXT
+  );
+  CREATE INDEX risk_items_report ON risk_items (report, last_seen);
+  `,
 ];
 
 export function openDb(path) {

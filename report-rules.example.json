@@ -1,0 +1,20 @@
+{
+  "_help": "Copy to report-rules.json to change how report follow-ups are ranked and shown. weights: higher shows earlier (defaults in src/reports/learning.js). disabled: rule names, optionally prefixed with the report (scrum:, releases:, features:, prod:). collapseUnchanged: show repeats with unchanged facts as one line; alwaysShowScore: never collapse at or above this score. Jira data is never changed; this only affects ordering and visibility of the inferred follow-ups.",
+  "weights": {
+    "blocker": 80,
+    "critical": 95,
+    "no-owner": 45,
+    "unestimated": 10
+  },
+  "disabled": [
+    "scrum:no-component",
+    "releases:multi-version"
+  ],
+  "collapseUnchanged": true,
+  "alwaysShowScore": 75,
+  "validBoost": 30,
+  "dismissPenalty": 20,
+  "dismissMinVerdicts": 3,
+  "chronicBlockedDays": 5,
+  "recurrenceDays": 30
+}

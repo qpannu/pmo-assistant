@@ -5,6 +5,7 @@
 // risks and follow-ups are rule-based inferences and labelled as such.
 // Nothing here writes to Jira.
 
+import { followUpLine, learningLines } from './learning.js';
 import { truncate } from '../text.js';
 import { loadBoard, toWorkItem, blockReasons, daysBetween, PHASES, PHASE_LABEL } from './board.js';
 import { diffSnapshot } from './snapshot.js';
@@ -289,6 +290,7 @@ export function renderReleaseReport(rep) {
 
   lines.push('', `**➡️ Recommended actions and decisions**${rep.followUpsSource === 'claude' ? ' (prioritised by Claude from the facts above)' : ' (rule-based)'}`);
   if (!rep.followUps.length) lines.push('- Nothing needs your attention');
-  for (const f of rep.followUps) lines.push(`- ${f.text}`);
+  for (const f of rep.followUps) lines.push(followUpLine(f));
+  lines.push(...learningLines(rep.learning, { recurring: rep.recurring ?? [], days: rep.recurrenceDays }));
   return lines.join('\n');
 }

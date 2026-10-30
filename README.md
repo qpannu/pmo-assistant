@@ -120,6 +120,57 @@ with ≤3 days left.
   re-analysis, even if Jira's `updated` timestamp moved.
 - Syncs never overlap; failures are logged and recorded without losing the sync position.
 
+## Jira reports (scrum, releases, features, production)
+
+Four independent reports, each run on its own. Facts (counts, statuses, dates) are computed
+from Jira; health, risks and follow-ups are rule-based inferences and are labelled as such.
+Nothing changes Jira.
+
+```bash
+npm run report -- scrum        # active sprint(s) on JIRA_BOARD_ID named REPORT_SPRINT_PREFIX…
+npm run report -- releases     # unreleased Fix Versions starting with REPORT_RELEASE_PREFIXES
+npm run report -- features     # tracked initiatives: health, dev/QA progress, estimated finish
+npm run report -- prod         # REPORT_PROD_ISSUE_TYPE in REPORT_PROD_PROJECT for REPORT_PROD_TEAM
+```
+
+Add `--json` for structured output or `--no-save` to skip the snapshot. Over HTTP:
+`GET /reports/<name>` (`?format=md` for text).
+
+- **Scrum:** phases follow the board's columns; progress by issues and story points, by component;
+  blockers (status, flag, "is blocked by"), dependencies, carry-over, at-risk items.
+- **Releases:** progress per version (merged by name across projects), target-date status,
+  bugs, blocked work, work outside the active sprint; finished-but-unreleased and dormant versions.
+- **Features:** Initiative → Epics → issues via `parent`. Dev progress (Open … Building = not
+  dev-complete), QA progress (Ready for QA / QA in Progress; anything later = QA done); Blocked and
+  On Hold are placed by who moved them there (change log vs Assigned Developer / Assigned QA).
+  Weighted by DEV/QA Hours when most tickets have them; estimated finish from remaining hours per
+  person at `REPORT_DEV_HOURS_PER_DAY` / `REPORT_QA_HOURS_PER_DAY`.
+- **Production:** the Team dropdown is matched and re-checked per issue; open issues split into
+  "with engineering" and "waiting" (`REPORT_PROD_WAITING_STATUSES`), severity, age, stalled,
+  blocked, ownership, recently resolved.
+
+**Tracked features** (no code changes needed; history is kept when you remove one):
+
+```bash
+npm run features -- list
+npm run features -- add REST-12345 "note"
+npm run features -- remove REST-12345
+```
+
+**Learning from history and your feedback.** Each follow-up shows a short ref. Mark it:
+
+```bash
+npm run risk -- list
+npm run risk -- a1b2c3 dismissed "known, vendor fix due Friday"
+```
+
+`valid` ranks it higher; `dismissed` hides it until its facts change in Jira; `resolved` keeps it
+visible with a note if Jira still shows it; `clear` forgets the verdict. Rule types you mostly
+dismiss rank lower; unchanged repeats collapse into one line (urgent ones always show); recurring
+blockers and reopened production issues are found from past snapshots. Weights and on/off
+switches live in `report-rules.json` (copy `report-rules.example.json`). This is counting and
+rules, not model training, and it never overrides Jira data.
+
 ## Outlook and Teams (read-only, Microsoft Graph)
 
 ### 1. Register an app in Microsoft Entra ID (one time, free)

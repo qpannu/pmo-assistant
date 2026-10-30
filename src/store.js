@@ -408,6 +408,59 @@ export function createStore(db) {
     return row ? { ...row, data: JSON.parse(row.data) } : null;
   }
 
+  // Snapshots taken at or after `since` (ISO), oldest first.
+  function listReportSnapshots(report, scope, since) {
+    return stmt(`SELECT * FROM report_snapshots WHERE report = ? AND scope = ? AND taken_at >= ? ORDER BY taken_at, id`)
+      .all(report, String(scope), since)
+      .map((row) => ({ ...row, data: JSON.parse(row.data) }));
+  }
+
+  // ─── Risk items and my feedback on them ─────────────────────────────────────
+  function getRiskItem(ref) {
+    const row = stmt(`SELECT * FROM risk_items WHERE ref = ?`).get(ref);
+    return row ? { ...row, keys: JSON.parse(row.keys ?? '[]') } : null;
+  }
+
+  // Records that a report raised this risk now; returns the row as it was before.
+  function recordRiskSeen({ ref, riskId, report, rule, keys, text, fingerprint, at = now() }) {
+    const before = getRiskItem(ref);
+    if (!before) {
+      stmt(`INSERT INTO risk_items (ref, risk_id, report, rule, keys, text, fingerprint, first_seen, last_seen, times_seen, changed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`).run(ref, riskId, report, rule, JSON.stringify(keys ?? []), text, fingerprint, at, at, at);
+    } else {
+      stmt(`UPDATE risk_items SET text = ?, last_seen = ?, times_seen = times_seen + 1,
+              changed_at = CASE WHEN fingerprint = ? THEN changed_at ELSE ? END, fingerprint = ? WHERE ref = ?`)
+        .run(text, at, fingerprint, at, fingerprint, ref);
+    }
+    return before;
+  }
+
+  // verdict: 'valid' | 'dismissed' | 'resolved' | null (clear). Remembers the facts it applied to.
+  function setRiskVerdict(ref, verdict, note = null) {
+    const row = getRiskItem(ref);
+    if (!row) return null;
+    stmt(`UPDATE risk_items SET verdict = ?, verdict_note = ?, verdict_fingerprint = ?, verdict_at = ? WHERE ref = ?`)
+      .run(verdict, verdict ? note : null, verdict ? row.fingerprint : null, verdict ? now() : null, ref);
+    addHistory('risk', ref, verdict ? `verdict:${verdict}` : 'verdict:cleared', { note, text: row.text });
+    return getRiskItem(ref);
+  }
+
+  function listRiskItems({ report = null, since = '0000', limit = 200 } = {}) {
+    return stmt(`SELECT * FROM risk_items WHERE (? IS NULL OR report = ?) AND last_seen >= ? ORDER BY last_seen DESC, ref LIMIT ?`)
+      .all(report, report, since, limit)
+      .map((row) => ({ ...row, keys: JSON.parse(row.keys ?? '[]') }));
+  }
+
+  // How I've judged each rule's risks before: { rule: { valid, dismissed, resolved } }.
+  function riskVerdictStats(report) {
+    const out = {};
+    for (const r of stmt(`SELECT rule, verdict, COUNT(*) AS n FROM risk_items WHERE report = ? AND verdict IS NOT NULL GROUP BY rule, verdict`).all(report)) {
+      out[r.rule] ??= { valid: 0, dismissed: 0, resolved: 0 };
+      out[r.rule][r.verdict] = r.n;
+    }
+    return out;
+  }
+
   // ─── Tracked features (initiatives) ─────────────────────────────────────────
   function listTrackedFeatures({ includeRemoved = false } = {}) {
     return stmt(`SELECT * FROM tracked_features ${includeRemoved ? '' : 'WHERE removed_at IS NULL'} ORDER BY added_at, key`).all();
@@ -471,7 +524,8 @@ export function createStore(db) {
     recordLlmCall, llmUsageSince, actionEventsSince,
     createDraft, getDraft, listDrafts, editDraft, approveDraft, rejectDraft,
     claimDraftForSend, markDraftSent, markDraftFailed,
-    saveReportSnapshot, lastReportSnapshot,
+    saveReportSnapshot, lastReportSnapshot, listReportSnapshots,
+    getRiskItem, recordRiskSeen, setRiskVerdict, listRiskItems, riskVerdictStats,
     listTrackedFeatures, addTrackedFeature, removeTrackedFeature, seedTrackedFeatures, updateTrackedFeatureInfo,
   };
 }

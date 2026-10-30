@@ -215,13 +215,26 @@ describe('snapshots and comparisons', () => {
 });
 
 describe('Claude follow-up ordering', () => {
-  const rules = [{ rule: 'blocker', keys: ['REST-3'], text: 'Unblock REST-3 (Cy): status Blocked' }];
+  const rules = [
+    { rule: 'blocker', keys: ['REST-3'], text: 'Unblock REST-3 (Cy): status Blocked', ref: 'aaa111' },
+    { rule: 'no-owner', keys: ['REST-4'], text: 'Assign owners to 1 issue(s): REST-4', ref: 'bbb222' },
+    { rule: 'stale', keys: ['REST-6'], text: 'Check in on REST-6', ref: 'ccc333' },
+  ];
 
-  test('keeps only follow-ups that cite issue keys from the input', async () => {
-    const claude = { enabled: true, complete: async () => ({ json: { followUps: ['Talk to Cy about REST-3 today', 'Close REST-12345 now', 'Hold a sprint check-in'] } }) };
-    const r = await refineFollowUps({ claude, purpose: 't', facts: { blockers: ['REST-3'] }, followUps: rules });
+  test('reorders by index, keeps refs, ignores invented keys, and drops nothing', async () => {
+    const claude = { enabled: true, complete: async () => ({ json: { followUps: [
+      { index: 2, text: 'Ask Eve about REST-6 today' },
+      { index: 0, text: 'Close REST-12345 now' },  // cites a key that isn't in the original → original text kept
+      { index: 9, text: 'Made up' },               // no such follow-up → ignored
+      { index: 2, text: 'duplicate' },             // already picked → ignored
+    ] } }) };
+    const r = await refineFollowUps({ claude, purpose: 't', facts: {}, followUps: rules });
     assert.equal(r.source, 'claude');
-    assert.deepEqual(r.followUps.map((f) => f.text), ['Talk to Cy about REST-3 today', 'Hold a sprint check-in']);
+    assert.deepEqual(r.followUps.map((f) => [f.ref, f.text]), [
+      ['ccc333', 'Ask Eve about REST-6 today'],
+      ['aaa111', 'Unblock REST-3 (Cy): status Blocked'],
+      ['bbb222', 'Assign owners to 1 issue(s): REST-4'],
+    ]);
   });
 
   test('falls back to the rules when Claude is off or fails', async () => {

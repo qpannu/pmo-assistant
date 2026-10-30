@@ -135,6 +135,8 @@ export function loadConfig() {
       // Feature timeline: focus hours per assigned developer / QA per working day.
       devHoursPerDay: int('REPORT_DEV_HOURS_PER_DAY', 6, { min: 1, max: 12 }),
       qaHoursPerDay: int('REPORT_QA_HOURS_PER_DAY', 6, { min: 1, max: 12 }),
+      // Optional JSON file to re-weight or switch off follow-up rules (see report-rules.example.json).
+      rulesFile: str('REPORT_RULES_FILE', './report-rules.json'),
       // Production issues report: project + issue type + Team dropdown value.
       prod: Object.freeze({
         project: str('REPORT_PROD_PROJECT'),

@@ -4,6 +4,7 @@
 // Counts, statuses and dates are facts computed here; health, risks and
 // follow-ups are rule-based inferences and labelled as such. Read-only.
 
+import { followUpLine, learningLines } from './learning.js';
 import { truncate } from '../text.js';
 import { loadBoard, toWorkItem, blockReasons, daysBetween } from './board.js';
 import { diffSnapshot } from './snapshot.js';
@@ -391,7 +392,7 @@ const round = (n) => Math.round(n * 10) / 10;
 
 export function featureFollowUps(f) {
   const out = [];
-  const tag = (text, rule, keys = []) => out.push({ rule, keys: [f.key, ...keys], text: `${f.key}: ${text}` });
+  const tag = (text, rule, keys = []) => out.push({ rule, keys: [f.key, ...keys], subject: f.key, text: `${f.key}: ${text}` });
   const overdue = f.epics.filter((x) => x.flags.some((y) => y.includes('passed')));
   if (overdue.length === 1) tag(`re-plan ${overdue[0].key} (${overdue[0].owner ?? 'no owner'}) — ${overdue[0].flags.find((y) => y.includes('passed'))}`, 'epic-overdue', [overdue[0].key]);
   if (overdue.length > 1) {
@@ -525,6 +526,7 @@ export function renderFeatureReport(rep) {
   }
   lines.push('', `**➡️ Recommended follow-ups**${rep.followUpsSource === 'claude' ? ' (prioritised by Claude from the facts above)' : ' (rule-based)'}`);
   if (!rep.followUps.length) lines.push('- Nothing needs your attention');
-  for (const f of rep.followUps) lines.push(`- ${f.text}`);
+  for (const f of rep.followUps) lines.push(followUpLine(f));
+  lines.push(...learningLines(rep.learning, { recurring: rep.recurring ?? [], days: rep.recurrenceDays }));
   return lines.join('\n');
 }

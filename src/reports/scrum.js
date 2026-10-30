@@ -3,6 +3,7 @@
 // Health, at-risk items and follow-ups are rule-based inferences and are
 // labelled as such. Nothing here writes to Jira.
 
+import { followUpLine, learningLines } from './learning.js';
 import { truncate } from '../text.js';
 import { loadBoard, toWorkItem, blockReasons, daysBetween, PHASES, PHASE_LABEL } from './board.js';
 import { diffSnapshot } from './snapshot.js';
@@ -236,7 +237,10 @@ export function renderScrumReport(rep) {
       if (!ch.newlyDone.length && !ch.newlyBlocked.length && !ch.added.length && !ch.removed.length && !ch.moved.length) lines.push('- No changes');
       if (ch.newlyDone.length) lines.push(`- Done: ${ch.newlyDone.join(', ')}`);
       if (ch.newlyBlocked.length) lines.push(`- Newly blocked: ${ch.newlyBlocked.join(', ')}`);
-      if (ch.moved.length) lines.push(`- Moved: ${ch.moved.slice(0, 10).map((m) => `${m.key} ${PHASE_LABEL[m.from]} → ${PHASE_LABEL[m.to]}`).join('; ')}${ch.moved.length > 10 ? ` +${ch.moved.length - 10} more` : ''}`);
+      const back = ch.moved.filter((m) => m.backwards);
+      if (back.length) lines.push(`- ↩ Moved backwards (e.g. failed review/QA): ${back.map((m) => `${m.key} ${PHASE_LABEL[m.from]} → ${PHASE_LABEL[m.to]}`).join('; ')}`);
+      const fwd = ch.moved.filter((m) => !m.backwards);
+      if (fwd.length) lines.push(`- Moved: ${fwd.slice(0, 10).map((m) => `${m.key} ${PHASE_LABEL[m.from]} → ${PHASE_LABEL[m.to]}`).join('; ')}${fwd.length > 10 ? ` +${fwd.length - 10} more` : ''}`);
       if (ch.added.length) lines.push(`- Added to sprint: ${ch.added.join(', ')}`);
       if (ch.removed.length) lines.push(`- Removed from sprint: ${ch.removed.join(', ')}`);
     }
@@ -272,7 +276,9 @@ export function renderScrumReport(rep) {
 
     lines.push('', `**➡️ Recommended follow-ups**${s.followUpsSource === 'claude' ? ' (prioritised by Claude from the facts above)' : ' (rule-based)'}`);
     if (!s.followUps.length) lines.push('- Nothing needs your attention');
-    for (const f of s.followUps) lines.push(`- ${f.text}`);
+    for (const f of s.followUps) lines.push(followUpLine(f));
+    lines.push(...learningLines(s.learning, { hint: false }));
   }
+  lines.push(...learningLines(null, { recurring: rep.recurring ?? [], days: rep.recurrenceDays }));
   return lines.join('\n');
 }

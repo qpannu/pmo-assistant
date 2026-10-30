@@ -7,6 +7,7 @@ import { priorityRoutes } from './routes/priorities.js';
 import { assistantRoutes } from './routes/assistant.js';
 import { reportRoutes } from './routes/reports.js';
 import { featureRoutes } from './routes/features.js';
+import { riskRoutes } from './routes/risks.js';
 import { jiraOverview } from './jira/sync.js';
 import { outlookOverview } from './outlook/sync.js';
 import { teamsOverview } from './teams/sync.js';
@@ -58,6 +59,7 @@ export function createApp(config, { db, store, scheduler, reasoner = null, notif
     app.use('/actions', actionRoutes({ store }));
     app.use('/reports', reportRoutes({ store, config, jiraClient, claude }));
     app.use('/features', featureRoutes({ store, config, jiraClient }));
+    app.use('/risks', riskRoutes({ store }));
     app.use('/', priorityRoutes({ store, reasoner }));
     if (notifier && claude && briefings) {
       app.use('/', assistantRoutes({ store, config, scheduler, notifier, claude, briefings }));
