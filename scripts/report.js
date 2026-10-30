@@ -3,6 +3,8 @@
 //   npm run report -- scrum --sprint "RA 2.0"
 //   npm run report -- scrum --json          (full structured output)
 //   npm run report -- scrum --no-save       (don't record a snapshot)
+//   npm run report -- releases              (unreleased Fix Versions with board work)
+//   npm run report -- releases --version POS_7.46
 // Read-only towards Jira. Safe to run while the server is running.
 
 import { config } from '../src/config.js';
@@ -21,7 +23,7 @@ const opt = (flag) => {
   return i > 0 ? args[i + 1] : undefined;
 };
 if (!name || !REPORTS.includes(name)) {
-  console.error(`Usage: npm run report -- <${REPORTS.join('|')}> [--sprint <name|id>] [--board <id>] [--json] [--no-save]`);
+  console.error(`Usage: npm run report -- <${REPORTS.join('|')}> [--sprint <name|id>] [--version <name>] [--board <id>] [--json] [--no-save]`);
   process.exit(2);
 }
 
@@ -36,7 +38,7 @@ try {
   const { report, markdown } = await runReport(name, {
     client, store, claude, config,
     save: !args.includes('--no-save'),
-    options: { sprint: opt('--sprint'), board: opt('--board') },
+    options: { sprint: opt('--sprint'), version: opt('--version'), board: opt('--board') },
   });
   console.log(args.includes('--json') ? JSON.stringify(report, null, 2) : markdown);
 } catch (err) {

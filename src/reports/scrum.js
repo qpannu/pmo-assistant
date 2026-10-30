@@ -3,13 +3,9 @@
 // Health, at-risk items and follow-ups are rule-based inferences and are
 // labelled as such. Nothing here writes to Jira.
 
-import { normalizeIssue } from '../jira/normalize.js';
 import { truncate } from '../text.js';
-import { boardPhases, dependencies, daysBetween, PHASES, PHASE_LABEL } from './board.js';
+import { loadBoard, toWorkItem, blockReasons, daysBetween, PHASES, PHASE_LABEL } from './board.js';
 import { diffSnapshot } from './snapshot.js';
-
-const BASE_FIELDS = ['summary', 'status', 'issuetype', 'priority', 'assignee', 'components', 'fixVersions',
-  'issuelinks', 'updated', 'created', 'resolutiondate', 'flagged', 'closedSprints', 'labels'];
 
 export const SCRUM_DEFAULTS = Object.freeze({
   staleDays: 3,          // in progress / review with no update for this many days → at risk
@@ -30,14 +26,8 @@ const PRIORITY_RANK = { Highest: 0, Blocker: 0, Critical: 0, High: 1, Medium: 2,
 // "Restaurant"); an explicit sprintFilter (id or part of a name) overrides it.
 export async function buildScrumReport({ client, boardId, now = new Date(), previous = null, sprintFilter = null, sprintPrefix = '', rules = {} }) {
   const r = { ...SCRUM_DEFAULTS, ...rules };
-  const [config, statuses, sprintList] = await Promise.all([
-    client.boardConfiguration(boardId),
-    client.statuses(),
-    client.boardSprints(boardId, 'active'),
-  ]);
-  const phases = boardPhases(config, statuses);
-  const pointsField = config.estimation?.field?.fieldId ?? null;
-  const fields = pointsField ? [...BASE_FIELDS, pointsField] : BASE_FIELDS;
+  const [board, sprintList] = await Promise.all([loadBoard(client, boardId), client.boardSprints(boardId, 'active')]);
+  const { pointsField } = board;
 
   let sprints = sprintList.items;
   let wanted = 'The board has no active sprint';
@@ -57,18 +47,18 @@ export async function buildScrumReport({ client, boardId, now = new Date(), prev
 
   const out = [];
   for (const s of sprints) {
-    const { items, truncated } = await client.sprintIssues(boardId, s.id, fields);
+    const { items, truncated } = await client.sprintIssues(boardId, s.id, board.fields);
     if (truncated) warnings.push(`${s.name}: issue list truncated; counts may be low`);
-    out.push(sprintSection(s, items, { client, phases, pointsField, now, rules: r, previous: previous?.sprints?.[s.id] ?? null }));
+    out.push(sprintSection(s, items, { client, board, now, rules: r, previous: previous?.sprints?.[s.id] ?? null }));
   }
 
   return {
     report: 'scrum',
     boardId: Number(boardId),
-    boardName: config.name ?? `Board ${boardId}`,
+    boardName: board.name,
     asOf: now.toISOString(),
     pointsField,
-    columns: phases.columns.map((c) => ({ name: c.name, phase: c.phase })),
+    columns: board.phases.columns.map((c) => ({ name: c.name, phase: c.phase })),
     comparedWith: previous?.takenAt ?? null,
     sprints: out,
     warnings,
@@ -76,30 +66,8 @@ export async function buildScrumReport({ client, boardId, now = new Date(), prev
   };
 }
 
-function sprintSection(sprint, raw, { client, phases, pointsField, now, rules, previous }) {
-  const issues = raw.map((ri) => {
-    const n = normalizeIssue(ri);
-    const f = ri.fields ?? {};
-    const { phase, column } = phases.phaseOf(f.status);
-    return {
-      key: n.key,
-      summary: n.summary,
-      type: n.type,
-      status: n.status,
-      column,
-      phase,
-      priority: n.priority,
-      owner: n.assignee?.name ?? null,
-      points: pointsField && typeof f[pointsField] === 'number' ? f[pointsField] : null,
-      components: (f.components ?? []).map((c) => c.name),
-      fixVersions: n.fixVersions.map((v) => v.name),
-      flagged: f.flagged === true,
-      carriedOver: (f.closedSprints ?? []).length,
-      updated: f.updated ?? null,
-      deps: dependencies(ri),
-      url: client.browseUrl(n.key),
-    };
-  });
+function sprintSection(sprint, raw, { client, board, now, rules, previous }) {
+  const issues = raw.map((ri) => toWorkItem(ri, { client, board }));
 
   // ─── Facts ────────────────────────────────────────────────────────────────
   const start = sprint.startDate ?? sprint.activatedDate ?? null;
@@ -131,15 +99,8 @@ function sprintSection(sprint, raw, { client, phases, pointsField, now, rules, p
   const open = issues.filter((i) => i.phase !== 'done');
   const openDeps = (i) => i.deps.filter((d) => !d.done);
   const blockers = open
-    .filter((i) => i.phase === 'blocked' || i.flagged || openDeps(i).some((d) => d.kind === 'blocked by'))
-    .map((i) => ({
-      ...brief(i),
-      why: [
-        i.phase === 'blocked' && `status ${i.status}`,
-        i.flagged && 'flagged as impediment',
-        ...openDeps(i).filter((d) => d.kind === 'blocked by').map((d) => `blocked by ${d.key} (${d.status})`),
-      ].filter(Boolean),
-    }));
+    .map((i) => ({ ...brief(i), why: blockReasons(i) }))
+    .filter((b) => b.why.length);
   const dependencyList = open
     .filter((i) => openDeps(i).length)
     .map((i) => ({ ...brief(i), waitsOn: openDeps(i).map((d) => ({ key: d.key, kind: d.kind, status: d.status, url: client.browseUrl(d.key) })) }));

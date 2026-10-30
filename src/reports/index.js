@@ -3,10 +3,11 @@
 // there is no combined "all reports" output. Read-only towards Jira.
 
 import { buildScrumReport, renderScrumReport } from './scrum.js';
+import { buildReleaseReport, renderReleaseReport } from './releases.js';
 import { refineFollowUps } from './followups.js';
 import { startOfLocalDay } from './snapshot.js';
 
-export const REPORTS = ['scrum'];
+export const REPORTS = ['scrum', 'releases'];
 
 export class ReportError extends Error {
   constructor(message, status = 400) {
@@ -19,13 +20,18 @@ export class ReportError extends Error {
 export async function runReport(name, { client, store, claude = null, config, now = new Date(), save = true, options = {} }) {
   if (!REPORTS.includes(name)) throw new ReportError(`Unknown report "${name}". Available: ${REPORTS.join(', ')}`, 404);
   if (!client) throw new ReportError('Jira is not configured (set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN)', 503);
-  return runScrum({ client, store, claude, config, now, save, options });
+  const run = { scrum: runScrum, releases: runReleases }[name];
+  return run({ client, store, claude, config, now, save, options });
+}
+
+function boardIdFrom(config, options) {
+  const boardId = Number(options.board ?? config.reports.boardId);
+  if (!boardId) throw new ReportError('No board configured: set JIRA_BOARD_ID in .env (or pass a board id)', 400);
+  return boardId;
 }
 
 async function runScrum({ client, store, claude, config, now, save, options }) {
-  const boardId = Number(options.board ?? config.reports.boardId);
-  if (!boardId) throw new ReportError('No board configured: set JIRA_BOARD_ID in .env (or pass a board id)', 400);
-
+  const boardId = boardIdFrom(config, options);
   const prev = store.lastReportSnapshot('scrum', boardId, startOfLocalDay(now));
   const report = await buildScrumReport({
     client, boardId, now,
@@ -53,4 +59,35 @@ async function runScrum({ client, store, claude, config, now, save, options }) {
   if (save && !options.sprint && report.sprints.length) store.saveReportSnapshot('scrum', boardId, snapshot, now.toISOString());
 
   return { report, markdown: renderScrumReport(report) };
+}
+
+async function runReleases({ client, store, claude, config, now, save, options }) {
+  const boardId = boardIdFrom(config, options);
+  const prev = store.lastReportSnapshot('releases', boardId, startOfLocalDay(now));
+  const report = await buildReleaseReport({
+    client, boardId, now,
+    versionFilter: options.version ?? null,
+    prefixes: config.reports.releasePrefixes ?? [],
+    previous: prev ? { takenAt: prev.taken_at, versions: prev.data.versions } : null,
+    rules: { dueSoonDays: config.jira.releaseWindowDays, activeDays: config.reports.releaseActiveDays },
+  });
+
+  const facts = {
+    totals: report.totals,
+    releases: report.active.slice(0, 15).map((x) => ({
+      name: x.name, target: x.releaseDate, dateStatus: x.dateStatus, open: x.open, readiness: x.readiness.status, risks: x.risks,
+      blocked: x.blocked.slice(0, 3).map((b) => ({ key: b.key, owner: b.owner, why: b.why })),
+      urgentBugs: x.urgentBugs.slice(0, 3).map((b) => ({ key: b.key, owner: b.owner, priority: b.priority })),
+    })),
+  };
+  const refined = await refineFollowUps({ claude, purpose: 'report:releases', facts, followUps: report.followUps });
+  report.followUps = refined.followUps;
+  report.followUpsSource = refined.source;
+
+  const all = [...report.active, ...report.dormant, ...report.complete];
+  const snapshot = { versions: Object.fromEntries(all.map((x) => [x.name, { releaseDate: x.releaseDate, issues: x.snapshot }])) };
+  for (const x of all) delete x.snapshot;
+  if (save && !options.version && all.length) store.saveReportSnapshot('releases', boardId, snapshot, now.toISOString());
+
+  return { report, markdown: renderReleaseReport(report) };
 }

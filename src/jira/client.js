@@ -122,6 +122,11 @@ export function createJiraClient({ baseUrl, email, apiToken }, { fetchImpl = fet
       return agilePages(`/rest/agile/1.0/board/${Number(boardId)}/sprint`, { state }, 'values', 200);
     },
 
+    // Issues on a board (its own filter) that also match `jql`.
+    async boardIssues(boardId, jql, fields, limit = 3000) {
+      return agilePages(`/rest/agile/1.0/board/${Number(boardId)}/issue`, { jql, fields: fields.join(',') }, 'issues', limit);
+    },
+
     // Issues in one sprint, limited by the board's own filter (what the board shows).
     async sprintIssues(boardId, sprintId, fields, limit = 1000) {
       return agilePages(`/rest/agile/1.0/board/${Number(boardId)}/sprint/${Number(sprintId)}/issue`, { fields: fields.join(',') }, 'issues', limit);

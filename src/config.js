@@ -125,6 +125,10 @@ export function loadConfig() {
       sprintPrefix: str('REPORT_SPRINT_PREFIX'),
       staleDays: int('REPORT_STALE_DAYS', 3, { min: 1, max: 60 }),
       carryoverSprints: int('REPORT_CARRYOVER_SPRINTS', 3, { min: 1, max: 50 }),
+      // Release report: a version with open work but no issue updated for this long is "dormant".
+      releaseActiveDays: int('REPORT_RELEASE_ACTIVE_DAYS', 30, { min: 1, max: 365 }),
+      // Release report covers only versions whose name starts with one of these (empty = all).
+      releasePrefixes: list('REPORT_RELEASE_PREFIXES'),
     }),
 
     ms: Object.freeze({
