@@ -199,6 +199,18 @@ const MIGRATIONS = [
   );
   CREATE INDEX report_snapshots_lookup ON report_snapshots (report, scope, taken_at);
   `,
+
+  // 7 — features (initiatives) I track; removal is a soft delete so history stays
+  `
+  CREATE TABLE tracked_features (
+    key         TEXT PRIMARY KEY,    -- Jira key, e.g. REST-247
+    summary     TEXT,
+    issue_type  TEXT,                -- as verified in Jira when added
+    note        TEXT,
+    added_at    TEXT NOT NULL,
+    removed_at  TEXT                 -- NULL while tracked
+  );
+  `,
 ];
 
 export function openDb(path) {

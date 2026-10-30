@@ -25,6 +25,7 @@ export function createJiraClient({ baseUrl, email, apiToken }, { fetchImpl = fet
   const root = baseUrl.replace(/\/+$/, '');
   const auth = 'Basic ' + Buffer.from(`${email}:${apiToken}`).toString('base64');
   let me = null;
+  let fieldList = null;
 
   async function get(path, query = {}) {
     const qs = new URLSearchParams();
@@ -106,6 +107,23 @@ export function createJiraClient({ baseUrl, email, apiToken }, { fetchImpl = fet
 
     projectVersions(projectKey) {
       return get(`/rest/api/3/project/${encodeURIComponent(projectKey)}/versions`);
+    },
+
+    // Field definitions (cached), to find custom fields by name, e.g. "Target end".
+    async fields() {
+      fieldList ??= await get('/rest/api/3/field');
+      return fieldList;
+    },
+
+    // An issue's full change history, oldest first (all pages).
+    async changelog(key) {
+      const values = [];
+      for (let startAt = 0; ;) {
+        const page = await get(`/rest/api/3/issue/${encodeURIComponent(key)}/changelog`, { startAt, maxResults: 100 });
+        values.push(...(page.values ?? []));
+        startAt += page.values?.length ?? 0;
+        if (page.isLast !== false || !page.values?.length || values.length >= 2000) return values;
+      }
     },
 
     // Every status in the site, with its category (new / indeterminate / done).

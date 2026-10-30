@@ -129,6 +129,12 @@ export function loadConfig() {
       releaseActiveDays: int('REPORT_RELEASE_ACTIVE_DAYS', 30, { min: 1, max: 365 }),
       // Release report covers only versions whose name starts with one of these (empty = all).
       releasePrefixes: list('REPORT_RELEASE_PREFIXES'),
+      // Initial tracked features (initiative keys). Used once, to fill an empty
+      // registry; after that, add/remove with `npm run features`.
+      featureSeed: list('TRACKED_FEATURES_SEED'),
+      // Feature timeline: focus hours per assigned developer / QA per working day.
+      devHoursPerDay: int('REPORT_DEV_HOURS_PER_DAY', 6, { min: 1, max: 12 }),
+      qaHoursPerDay: int('REPORT_QA_HOURS_PER_DAY', 6, { min: 1, max: 12 }),
     }),
 
     ms: Object.freeze({

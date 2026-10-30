@@ -36,7 +36,9 @@
     "preteams:post": "node scripts/check-node.cjs",
     "teams:post": "node --env-file-if-exists=.env scripts/post-to-teams.js",
     "prereport": "node scripts/check-node.cjs",
-    "report": "node --env-file-if-exists=.env scripts/report.js"
+    "report": "node --env-file-if-exists=.env scripts/report.js",
+    "prefeatures": "node scripts/check-node.cjs",
+    "features": "node --env-file-if-exists=.env scripts/features.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

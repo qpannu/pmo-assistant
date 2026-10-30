@@ -10,3 +10,5 @@ Corrections and preferences from Qaiser, one file each. Prefixes: `feedback_`, `
 - [Cloud morning routine](project_cloud_morning_routine.md) — weekday 7 AM ET summary runs on Anthropic cloud (trig_01DijpoL9J9ErHUdDWaAkv9y); webhook from cloud env var; DST cron caveat
 - [Scrum report: Restaurant sprints only](feedback_scrum_report_restaurant_sprints.md) — show only tickets in sprints whose name starts with "Restaurant" (REPORT_SPRINT_PREFIX)
 - [Release report: tracked prefixes](feedback_release_report_tracked_prefixes.md) — only versions starting POS_7, MPOS_, KIOSK_, CCL_8. (REPORT_RELEASE_PREFIXES)
+- [Feature report: dev/QA progress](feedback_feature_report_dev_qa_progress.md) — per initiative: health, dev progress, QA progress, timeline from DEV/QA Hours; Assigned Dev/QA are FYI only
+- [Dev/QA status rules](feedback_dev_qa_status_rules.md) — Open…Building = not dev-complete; Ready for QA/QA in Progress = QA in progress; later = QA done; Blocked/On Hold decided by who moved it (change log)

@@ -4,10 +4,12 @@
 
 import { buildScrumReport, renderScrumReport } from './scrum.js';
 import { buildReleaseReport, renderReleaseReport } from './releases.js';
+import { buildFeatureReport, renderFeatureReport } from './features.js';
+import { listFeatures } from './registry.js';
 import { refineFollowUps } from './followups.js';
 import { startOfLocalDay } from './snapshot.js';
 
-export const REPORTS = ['scrum', 'releases'];
+export const REPORTS = ['scrum', 'releases', 'features'];
 
 export class ReportError extends Error {
   constructor(message, status = 400) {
@@ -20,7 +22,7 @@ export class ReportError extends Error {
 export async function runReport(name, { client, store, claude = null, config, now = new Date(), save = true, options = {} }) {
   if (!REPORTS.includes(name)) throw new ReportError(`Unknown report "${name}". Available: ${REPORTS.join(', ')}`, 404);
   if (!client) throw new ReportError('Jira is not configured (set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN)', 503);
-  const run = { scrum: runScrum, releases: runReleases }[name];
+  const run = { scrum: runScrum, releases: runReleases, features: runFeatures }[name];
   return run({ client, store, claude, config, now, save, options });
 }
 
@@ -90,4 +92,38 @@ async function runReleases({ client, store, claude, config, now, save, options }
   if (save && !options.version && all.length) store.saveReportSnapshot('releases', boardId, snapshot, now.toISOString());
 
   return { report, markdown: renderReleaseReport(report) };
+}
+
+async function runFeatures({ client, store, claude, config, now, save, options }) {
+  const { tracked, removed } = listFeatures(store, config);
+  const only = options.feature ? String(options.feature).toUpperCase() : null;
+  const features = only ? tracked.filter((f) => f.key === only) : tracked;
+  if (only && !features.length) throw new ReportError(`${only} is not a tracked feature (npm run features -- list)`, 404);
+
+  const prev = store.lastReportSnapshot('features', 'registry', startOfLocalDay(now));
+  const report = await buildFeatureReport({
+    client, now, features, removed,
+    boardId: config.reports.boardId || null,
+    previous: prev ? { takenAt: prev.taken_at, features: prev.data.features } : null,
+    rules: { dueSoonDays: config.jira.releaseWindowDays, devHoursPerDay: config.reports.devHoursPerDay, qaHoursPerDay: config.reports.qaHoursPerDay },
+  });
+
+  for (const f of report.features) store.updateTrackedFeatureInfo(f.key, { summary: f.summary, type: f.type });
+
+  const facts = report.features.map((f) => ({
+    feature: f.key, summary: f.summary, health: f.health.status, donePct: f.totals.donePct, open: f.totals.open, risks: f.risks,
+    devPct: f.dev.pct, qaPct: f.qa.pct, estimatedFinish: f.timeline.estimate?.finish ?? null,
+    epics: f.epics.filter((e) => e.flags.length).map((e) => ({ key: e.key, owner: e.owner, flags: e.flags })),
+    blockers: f.blockers.slice(0, 5).map((b) => ({ key: b.key, owner: b.owner, why: b.why })),
+  }));
+  const refined = await refineFollowUps({ claude, purpose: 'report:features', facts, followUps: report.followUps });
+  report.followUps = refined.followUps;
+  report.followUpsSource = refined.source;
+
+  // Snapshots keep removed features' history; a single-feature run isn't saved.
+  const snapshot = { features: Object.fromEntries(report.features.map((f) => [f.key, f.snapshot])) };
+  for (const f of report.features) delete f.snapshot;
+  if (save && !only) store.saveReportSnapshot('features', 'registry', snapshot, now.toISOString());
+
+  return { report, markdown: renderFeatureReport(report) };
 }

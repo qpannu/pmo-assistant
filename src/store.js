@@ -408,6 +408,49 @@ export function createStore(db) {
     return row ? { ...row, data: JSON.parse(row.data) } : null;
   }
 
+  // ─── Tracked features (initiatives) ─────────────────────────────────────────
+  function listTrackedFeatures({ includeRemoved = false } = {}) {
+    return stmt(`SELECT * FROM tracked_features ${includeRemoved ? '' : 'WHERE removed_at IS NULL'} ORDER BY added_at, key`).all();
+  }
+
+  // Adds a feature, or re-activates one that was removed. Returns 'added' | 'restored' | 'exists'.
+  function addTrackedFeature({ key, summary = null, type = null, note = null }) {
+    const k = String(key).trim().toUpperCase();
+    return transaction(db, () => {
+      const row = stmt(`SELECT * FROM tracked_features WHERE key = ?`).get(k);
+      if (row && !row.removed_at) return 'exists';
+      if (row) {
+        stmt(`UPDATE tracked_features SET removed_at = NULL, added_at = ?, summary = COALESCE(?, summary), issue_type = COALESCE(?, issue_type), note = COALESCE(?, note) WHERE key = ?`)
+          .run(now(), summary, type, note, k);
+        addHistory('feature', k, 'restored', { note });
+        return 'restored';
+      }
+      stmt(`INSERT INTO tracked_features (key, summary, issue_type, note, added_at) VALUES (?, ?, ?, ?, ?)`).run(k, summary, type, note, now());
+      addHistory('feature', k, 'added', { note });
+      return 'added';
+    });
+  }
+
+  function removeTrackedFeature(key) {
+    const k = String(key).trim().toUpperCase();
+    const r = stmt(`UPDATE tracked_features SET removed_at = ? WHERE key = ? AND removed_at IS NULL`).run(now(), k);
+    if (r.changes) addHistory('feature', k, 'removed', null);
+    return r.changes === 1;
+  }
+
+  // Records what Jira says the issue is (fills seeded rows; follows renames).
+  function updateTrackedFeatureInfo(key, { summary, type }) {
+    stmt(`UPDATE tracked_features SET summary = ?, issue_type = ? WHERE key = ? AND (summary IS NOT ? OR issue_type IS NOT ?)`)
+      .run(summary, type, key, summary, type);
+  }
+
+  // First use only: the table is never empty again, because removal is a soft delete.
+  function seedTrackedFeatures(keys) {
+    if (!keys.length || stmt(`SELECT COUNT(*) AS n FROM tracked_features`).get().n) return 0;
+    for (const key of keys) addTrackedFeature({ key, note: 'initial list' });
+    return keys.length;
+  }
+
   function listHistory(entityType, entityId) {
     return stmt(`SELECT * FROM history WHERE entity_type = ? AND entity_id = ? ORDER BY id`).all(entityType, entityId);
   }
@@ -429,5 +472,6 @@ export function createStore(db) {
     createDraft, getDraft, listDrafts, editDraft, approveDraft, rejectDraft,
     claimDraftForSend, markDraftSent, markDraftFailed,
     saveReportSnapshot, lastReportSnapshot,
+    listTrackedFeatures, addTrackedFeature, removeTrackedFeature, seedTrackedFeatures, updateTrackedFeatureInfo,
   };
 }
