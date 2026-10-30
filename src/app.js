@@ -5,11 +5,12 @@ import { sourceRoutes } from './routes/sources.js';
 import { actionRoutes } from './routes/actions.js';
 import { priorityRoutes } from './routes/priorities.js';
 import { assistantRoutes } from './routes/assistant.js';
+import { reportRoutes } from './routes/reports.js';
 import { jiraOverview } from './jira/sync.js';
 import { outlookOverview } from './outlook/sync.js';
 import { teamsOverview } from './teams/sync.js';
 
-export function createApp(config, { db, store, scheduler, reasoner = null, notifier = null, claude = null, briefings = null } = {}) {
+export function createApp(config, { db, store, scheduler, reasoner = null, notifier = null, claude = null, briefings = null, jiraClient = null } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
@@ -54,6 +55,7 @@ export function createApp(config, { db, store, scheduler, reasoner = null, notif
       setupHint: 'Set MS_TENANT_ID and MS_CLIENT_ID in .env, run `npm run ms:login`, then restart.',
     }));
     app.use('/actions', actionRoutes({ store }));
+    app.use('/reports', reportRoutes({ store, config, jiraClient, claude }));
     app.use('/', priorityRoutes({ store, reasoner }));
     if (notifier && claude && briefings) {
       app.use('/', assistantRoutes({ store, config, scheduler, notifier, claude, briefings }));

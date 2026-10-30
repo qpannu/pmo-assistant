@@ -186,6 +186,19 @@ const MIGRATIONS = [
   );
   CREATE INDEX chat_turns_chat ON chat_turns (chat_id, created_at);
   `,
+
+  // 6 — report snapshots (scrum, releases, features, prod), kept for comparisons
+  `
+  CREATE TABLE report_snapshots (
+    id         INTEGER PRIMARY KEY,
+    report     TEXT NOT NULL,       -- 'scrum' | 'releases' | 'features' | 'prod'
+    scope      TEXT NOT NULL,       -- e.g. board id, or 'tesla'
+    data       TEXT NOT NULL,       -- JSON: compact per-issue state for diffs
+    hash       TEXT NOT NULL,
+    taken_at   TEXT NOT NULL
+  );
+  CREATE INDEX report_snapshots_lookup ON report_snapshots (report, scope, taken_at);
+  `,
 ];
 
 export function openDb(path) {

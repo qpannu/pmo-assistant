@@ -393,6 +393,21 @@ export function createStore(db) {
   const markDraftSent = (id) => transitionDraft(id, 'sending', 'sent', { sent_at: now() });
   const markDraftFailed = (id, error) => transitionDraft(id, 'sending', 'failed', { error: String(error).slice(0, 1000) });
 
+  // ─── Report snapshots ──────────────────────────────────────────────────────
+  function saveReportSnapshot(report, scope, data, takenAt = now()) {
+    const json = JSON.stringify(data);
+    const { lastInsertRowid } = stmt(`INSERT INTO report_snapshots (report, scope, data, hash, taken_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(report, String(scope), json, contentHash(data), takenAt);
+    return Number(lastInsertRowid);
+  }
+
+  // Latest snapshot taken before `before` (ISO), or null.
+  function lastReportSnapshot(report, scope, before = '9999') {
+    const row = stmt(`SELECT * FROM report_snapshots WHERE report = ? AND scope = ? AND taken_at < ? ORDER BY taken_at DESC, id DESC LIMIT 1`)
+      .get(report, String(scope), before);
+    return row ? { ...row, data: JSON.parse(row.data) } : null;
+  }
+
   function listHistory(entityType, entityId) {
     return stmt(`SELECT * FROM history WHERE entity_type = ? AND entity_id = ? ORDER BY id`).all(entityType, entityId);
   }
@@ -413,5 +428,6 @@ export function createStore(db) {
     recordLlmCall, llmUsageSince, actionEventsSince,
     createDraft, getDraft, listDrafts, editDraft, approveDraft, rejectDraft,
     claimDraftForSend, markDraftSent, markDraftFailed,
+    saveReportSnapshot, lastReportSnapshot,
   };
 }

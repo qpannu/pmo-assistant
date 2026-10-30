@@ -62,6 +62,22 @@ export function createJiraClient({ baseUrl, email, apiToken }, { fetchImpl = fet
     }
   }
 
+  // Agile endpoints page with startAt/maxResults. Returns { items, truncated }.
+  async function agilePages(path, query, key, limit) {
+    const items = [];
+    for (;;) {
+      const page = await get(path, { ...query, startAt: items.length, maxResults: Math.min(100, limit - items.length) });
+      const got = page[key] ?? [];
+      items.push(...got);
+      const done = page.isLast === true || !got.length || (Number.isFinite(page.total) && items.length >= page.total);
+      if (done) return { items, truncated: false };
+      if (items.length >= limit) {
+        log.warn('agile list truncated at limit', { path, limit });
+        return { items, truncated: true };
+      }
+    }
+  }
+
   return {
     // Current user (cached for the life of the process).
     async myself() {
@@ -90,6 +106,25 @@ export function createJiraClient({ baseUrl, email, apiToken }, { fetchImpl = fet
 
     projectVersions(projectKey) {
       return get(`/rest/api/3/project/${encodeURIComponent(projectKey)}/versions`);
+    },
+
+    // Every status in the site, with its category (new / indeterminate / done).
+    statuses() {
+      return get('/rest/api/3/status');
+    },
+
+    // ─── Jira Software (agile) — boards and sprints, read-only ───────────────
+    boardConfiguration(boardId) {
+      return get(`/rest/agile/1.0/board/${Number(boardId)}/configuration`);
+    },
+
+    async boardSprints(boardId, state = 'active') {
+      return agilePages(`/rest/agile/1.0/board/${Number(boardId)}/sprint`, { state }, 'values', 200);
+    },
+
+    // Issues in one sprint, limited by the board's own filter (what the board shows).
+    async sprintIssues(boardId, sprintId, fields, limit = 1000) {
+      return agilePages(`/rest/agile/1.0/board/${Number(boardId)}/sprint/${Number(sprintId)}/issue`, { fields: fields.join(',') }, 'issues', limit);
     },
 
     browseUrl: (key) => `${root}/browse/${key}`,

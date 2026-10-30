@@ -168,7 +168,7 @@ process.on('uncaughtException', (err) => {
 });
 
 // Express 5 also calls this callback when listening fails; 'error' below handles that.
-const server = createApp(config, { db, store, scheduler, reasoner, notifier, claude, briefings }).listen(config.port, config.host, (err) => {
+const server = createApp(config, { db, store, scheduler, reasoner, notifier, claude, briefings, jiraClient }).listen(config.port, config.host, (err) => {
   if (err) return;
   logger.info('PMO assistant started', {
     url: `http://${config.host}:${config.port}`,

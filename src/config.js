@@ -117,6 +117,16 @@ export function loadConfig() {
       watcherActiveDays: int('JIRA_WATCHER_ACTIVE_DAYS', 90, { min: 0, max: 3650 }),
     }),
 
+    // Jira reports (scrum, releases, features, prod). Thresholds drive the
+    // rule-based "inferred" sections; facts are always computed from Jira.
+    reports: Object.freeze({
+      boardId: int('JIRA_BOARD_ID', 0),
+      // Scrum report covers only active sprints whose name starts with this (empty = all).
+      sprintPrefix: str('REPORT_SPRINT_PREFIX'),
+      staleDays: int('REPORT_STALE_DAYS', 3, { min: 1, max: 60 }),
+      carryoverSprints: int('REPORT_CARRYOVER_SPRINTS', 3, { min: 1, max: 50 }),
+    }),
+
     ms: Object.freeze({
       tenantId: str('MS_TENANT_ID'),
       clientId: str('MS_CLIENT_ID'),

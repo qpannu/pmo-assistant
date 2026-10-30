@@ -8,3 +8,4 @@ Corrections and preferences from Qaiser, one file each. Prefixes: `feedback_`, `
 - [No published calendar](feedback_no_published_calendar.md) — never ask me to publish/share my calendar; post the summary built from the M365 connector, like the chat one
 - [PMO agent team](project_pmo_agent_team.md) — ~/.claude/agents: 4 Opus analysers, 3 Sonnet executors, pmo-qa-gate fails anything < 95/100
 - [Cloud morning routine](project_cloud_morning_routine.md) — weekday 7 AM ET summary runs on Anthropic cloud (trig_01DijpoL9J9ErHUdDWaAkv9y); webhook from cloud env var; DST cron caveat
+- [Scrum report: Restaurant sprints only](feedback_scrum_report_restaurant_sprints.md) — show only tickets in sprints whose name starts with "Restaurant" (REPORT_SPRINT_PREFIX)
