@@ -428,9 +428,11 @@ export function createStore(db) {
       stmt(`INSERT INTO risk_items (ref, risk_id, report, rule, keys, text, fingerprint, first_seen, last_seen, times_seen, changed_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`).run(ref, riskId, report, rule, JSON.stringify(keys ?? []), text, fingerprint, at, at, at);
     } else {
-      stmt(`UPDATE risk_items SET text = ?, last_seen = ?, times_seen = times_seen + 1,
+      // Counted once per day, so re-running a report (or refreshing the dashboard) doesn't inflate it.
+      stmt(`UPDATE risk_items SET text = ?, last_seen = ?,
+              times_seen = times_seen + CASE WHEN substr(last_seen, 1, 10) = substr(?, 1, 10) THEN 0 ELSE 1 END,
               changed_at = CASE WHEN fingerprint = ? THEN changed_at ELSE ? END, fingerprint = ? WHERE ref = ?`)
-        .run(text, at, fingerprint, at, fingerprint, ref);
+        .run(text, at, at, fingerprint, at, fingerprint, ref);
     }
     return before;
   }

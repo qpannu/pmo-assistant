@@ -69,7 +69,7 @@ describe('applyLearning', () => {
     const out = applyLearning({ store, report: 'scrum', followUps: list, now: DAY2 });
     assert.deepEqual(out.followUps.map((f) => [f.rule, f.status]), [['blocker', 'unchanged'], ['no-owner', 'changed']], 'blocker ≥ alwaysShowScore stays visible');
     assert.deepEqual(out.unchanged.map((f) => f.rule), ['stale', 'unestimated']);
-    assert.ok(out.followUps[0].why.some((w) => /raised 2 time\(s\) since 2026-11-02/.test(w)));
+    assert.ok(out.followUps[0].why.some((w) => /raised on 1 earlier day\(s\) since 2026-11-02/.test(w)));
   });
 
   test('dismissed stays hidden until its facts change; resolved and valid add notes; valid ranks higher', () => {
@@ -216,4 +216,22 @@ describe('rendering and feedback commands', () => {
       scheduler.stop();
     }
   });
+});
+
+test('a follow-up seen several times in one day counts once (dashboard refreshes do not inflate it)', () => {
+  const store = createStore(openDb(':memory:'));
+  const f = [{ rule: 'blocker', keys: ['REST-3'], text: 'Unblock REST-3' }];
+  for (const hour of ['09', '11', '15']) applyLearning({ store, report: 'scrum', followUps: f, now: new Date(`2026-11-02T${hour}:00:00Z`) });
+  applyLearning({ store, report: 'scrum', followUps: f, now: new Date('2026-11-03T09:00:00Z') });
+  assert.equal(store.listRiskItems()[0].times_seen, 2);
+});
+
+test('re-running the same day gives no repeat boost; a new day does', () => {
+  const store = createStore(openDb(':memory:'));
+  const f = [{ rule: 'stale', keys: ['REST-6'], text: 'Check in on REST-6' }];
+  applyLearning({ store, report: 'scrum', followUps: f, now: new Date('2026-11-02T09:00:00Z') });
+  const same = applyLearning({ store, report: 'scrum', followUps: f, now: new Date('2026-11-02T15:00:00Z'), rules: { ...DEFAULT_RULES, collapseUnchanged: false } });
+  assert.deepEqual([same.followUps[0].score, same.followUps[0].why], [50, ['rule stale (50)']]);
+  const next = applyLearning({ store, report: 'scrum', followUps: f, now: new Date('2026-11-03T09:00:00Z'), rules: { ...DEFAULT_RULES, collapseUnchanged: false } });
+  assert.equal(next.followUps[0].score, 52);
 });

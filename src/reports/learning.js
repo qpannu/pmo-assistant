@@ -109,8 +109,9 @@ export function applyLearning({ store, report, followUps, rules = DEFAULT_RULES,
     const why = [];
     let score = rules.weights[f.rule] ?? 50;
     why.push(`rule ${f.rule} (${score})`);
-    const seen = before?.times_seen ?? 0;
-    if (seen) { score += Math.min(seen, 10) * rules.repeatBoost; why.push(`raised ${seen + (save ? 1 : 0)} time(s) since ${before.first_seen.slice(0, 10)}`); }
+    // Earlier days it was raised on (re-runs on the same day don't count).
+    const earlierDays = before ? before.times_seen - (before.last_seen.slice(0, 10) === at.slice(0, 10) ? 1 : 0) : 0;
+    if (earlierDays > 0) { score += Math.min(earlierDays, 10) * rules.repeatBoost; why.push(`raised on ${earlierDays} earlier day(s) since ${before.first_seen.slice(0, 10)}`); }
     if (penalised.includes(f.rule)) { score -= rules.dismissPenalty; why.push('you usually dismiss this kind'); }
 
     let note = null;

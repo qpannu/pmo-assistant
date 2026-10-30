@@ -44,3 +44,30 @@ test('action routes list items with sources and update status locally', async ()
     scheduler.stop();
   }
 });
+
+test('the dashboard page and script are served with a strict content policy', async () => {
+  const db = openDb(':memory:');
+  const store = createStore(db);
+  const scheduler = createScheduler();
+  const server = createApp(loadConfig(), { db, store, scheduler }).listen(0, '127.0.0.1');
+  await new Promise((r) => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const page = await fetch(`${base}/dashboard`);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-type'), /text\/html/);
+    assert.match(page.headers.get('content-security-policy'), /script-src 'self';/);
+    const html = await page.text();
+    assert.match(html, /<script src="\/dashboard\.js"><\/script>/);
+    assert.doesNotMatch(html, /<script>(?!<\/)/, 'no inline script');
+    assert.doesNotMatch(html, /https?:\/\/(?!localhost)/, 'no third-party resources');
+    const js = await fetch(`${base}/dashboard.js`);
+    assert.match(js.headers.get('content-type'), /javascript/);
+    assert.doesNotMatch(await js.text(), /innerHTML/, 'Jira text is never inserted as HTML');
+    const root = await fetch(`${base}/`, { redirect: 'manual' });
+    assert.equal(root.headers.get('location'), '/dashboard');
+  } finally {
+    server.close();
+    scheduler.stop();
+  }
+});

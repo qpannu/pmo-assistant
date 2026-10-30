@@ -1,4 +1,5 @@
 import express from 'express';
+import { fileURLToPath } from 'node:url';
 import { integrationStatus } from './config.js';
 import { logger } from './logger.js';
 import { sourceRoutes } from './routes/sources.js';
@@ -60,6 +61,17 @@ export function createApp(config, { db, store, scheduler, reasoner = null, notif
     app.use('/reports', reportRoutes({ store, config, jiraClient, claude }));
     app.use('/features', featureRoutes({ store, config, jiraClient }));
     app.use('/risks', riskRoutes({ store }));
+
+    // The dashboard: one local page over the endpoints above. The script is a
+    // separate file so the page can forbid inline and third-party scripts.
+    const page = (file, type) => (req, res) => {
+      res.set('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+      res.set('X-Content-Type-Options', 'nosniff');
+      res.type(type).sendFile(fileURLToPath(new URL(`../public/${file}`, import.meta.url)));
+    };
+    app.get('/dashboard', page('dashboard.html', 'html'));
+    app.get('/dashboard.js', page('dashboard.js', 'js'));
+    app.get('/', (req, res) => res.redirect('/dashboard'));
     app.use('/', priorityRoutes({ store, reasoner }));
     if (notifier && claude && briefings) {
       app.use('/', assistantRoutes({ store, config, scheduler, notifier, claude, briefings }));

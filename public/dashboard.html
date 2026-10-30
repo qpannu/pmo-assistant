@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PMO Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5f6b7a; --line: #e3e7ec;
+    --accent: #2f5bd3; --accent-soft: #e8eefc;
+    --red: #c4352b; --red-soft: #fdecea; --amber: #b86e00; --amber-soft: #fff4e0;
+    --green: #22863a; --green-soft: #e6f4ea; --grey-soft: #eef1f4;
+    --bar: #dfe4ea; --dev: #2f5bd3; --qa: #7c4dbd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a; --panel: #1b2027; --text: #e6e9ee; --muted: #9aa5b3; --line: #2b323c;
+      --accent: #7ea2ff; --accent-soft: #1f2a44;
+      --red: #ff7b72; --red-soft: #3a1d1c; --amber: #f0b45b; --amber-soft: #3a2c14;
+      --green: #6fd08a; --green-soft: #173222; --grey-soft: #252b34;
+      --bar: #2d343e; --dev: #7ea2ff; --qa: #b993f0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .bar { max-width: 1200px; margin: 0 auto; padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 17px; margin: 0; font-weight: 650; }
+  .asof { color: var(--muted); font-size: 12px; }
+  .spacer { flex: 1; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  nav { max-width: 1200px; margin: 0 auto; padding: 0 16px; display: flex; gap: 4px; overflow-x: auto; }
+  nav button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 10px; background: none; color: var(--muted); white-space: nowrap; }
+  nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  section[hidden] { display: none; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .card h3 { font-size: 15px; margin: 0 0 6px; }
+  .big { font-size: 26px; font-weight: 650; line-height: 1.1; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--grey-soft); color: var(--muted); white-space: nowrap; }
+  .chip.red { background: var(--red-soft); color: var(--red); }
+  .chip.amber { background: var(--amber-soft); color: var(--amber); }
+  .chip.green { background: var(--green-soft); color: var(--green); }
+  .chip.blue { background: var(--accent-soft); color: var(--accent); }
+  .meter { height: 8px; background: var(--bar); border-radius: 4px; overflow: hidden; margin: 4px 0; }
+  .meter > span { display: block; height: 100%; background: var(--accent); }
+  .meter.dev > span { background: var(--dev); }
+  .meter.qa > span { background: var(--qa); }
+  .stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--bar); margin: 6px 0; }
+  .stack span { height: 100%; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { padding: 7px 0; border-top: 1px solid var(--line); }
+  ul.list li:first-child { border-top: 0; }
+  .muted { color: var(--muted); }
+  .why { color: var(--muted); font-size: 12px; }
+  .section-title { display: flex; align-items: center; gap: 8px; margin: 18px 0 8px; }
+  .section-title h2 { font-size: 15px; margin: 0; }
+  .fact-note { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+  .inferred { border-left: 3px solid var(--amber); padding-left: 10px; }
+  .fu { display: flex; gap: 10px; align-items: flex-start; }
+  .fu .txt { flex: 1; min-width: 0; }
+  .fu .acts { display: flex; gap: 4px; flex-shrink: 0; }
+  .fu .acts button { padding: 2px 7px; font-size: 12px; }
+  .tag { font-size: 11px; color: var(--muted); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .err { background: var(--red-soft); color: var(--red); border-radius: 8px; padding: 10px; }
+  .loading { color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; border-top: 0; }
+  .scroll { overflow-x: auto; }
+  form.inline { display: flex; gap: 6px; flex-wrap: wrap; }
+  input[type=text] { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); min-width: 0; }
+  .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 600px) { .fu { flex-direction: column; } .big { font-size: 22px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>PMO Dashboard</h1>
+    <span class="asof" id="asof">Loading…</span>
+    <span class="spacer"></span>
+    <button id="refresh" class="primary" title="Re-read Jira now (otherwise results are up to 5 minutes old)">Refresh from Jira</button>
+  </div>
+  <nav role="tablist" id="tabs">
+    <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+    <button role="tab" data-tab="scrum">Sprint</button>
+    <button role="tab" data-tab="releases">Releases</button>
+    <button role="tab" data-tab="features">Features</button>
+    <button role="tab" data-tab="prod">Production</button>
+    <button role="tab" data-tab="followups">Follow-ups</button>
+  </nav>
+</header>
+<main>
+  <section id="overview"></section>
+  <section id="scrum" hidden></section>
+  <section id="releases" hidden></section>
+  <section id="features" hidden></section>
+  <section id="prod" hidden></section>
+  <section id="followups" hidden></section>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/dashboard.js"></script>
+</body>
+</html>
