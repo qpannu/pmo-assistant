@@ -14,11 +14,8 @@ const words = (s) => (s.toLowerCase().match(/[a-z0-9][a-z0-9._-]{2,}/g) ?? []).f
 const SYSTEM = `You answer questions from a senior program manager about their projects, releases and pending work.
 Answer from the records provided only. Be direct: lead with the answer, then the supporting facts (ticket keys, people, dates). If the records don't contain the answer, say so and suggest where to look. Keep it under 150 words unless the question asks for a list.`;
 
-export async function answerQuestion({ store, claude, question, now = new Date() }) {
-  const q = String(question ?? '').trim();
-  if (!q) throw Object.assign(new Error('question is required'), { status: 400 });
-
-  const report = await runPriorityEngine(store, { now });
+// Action items and Jira issues relevant to a question (Jira keys, keywords).
+export function relevantRecords(store, report, q) {
   const items = [...report.critical, ...report.waitingOnMe, ...report.releaseRisks, ...report.followUps];
   const keys = new Set(extractJiraKeys(q.toUpperCase()));
   const terms = words(q);
@@ -48,12 +45,21 @@ export async function answerQuestion({ store, claude, question, now = new Date()
       key: r.data.key, summary: truncate(r.data.summary, 100), status: r.data.status, priority: r.data.priority,
       assignee: r.data.assignee?.name ?? null, due: r.data.dueDate, releases: r.data.fixVersions.map((v) => v.name), url: r.url,
     }));
+  return { items, actions, issues };
+}
+
+export async function answerQuestion({ store, claude, question, now = new Date() }) {
+  const q = String(question ?? '').trim();
+  if (!q) throw Object.assign(new Error('question is required'), { status: 400 });
+
+  const report = await runPriorityEngine(store, { now });
+  const { items, actions, issues } = relevantRecords(store, report, q);
 
   const context = {
     today: now.toISOString().slice(0, 10),
     counts: report.counts,
     releasesAtRisk: releasesAtRisk(store),
-    actionItems: (actions.length ? actions.map((x) => x.i) : items.slice(0, 8)).map(compactItem),
+    actionItems: (actions.length ? actions.map((x) => x.i) : items.slice(0, 8)).map((i) => compactItem(i)),
     jiraIssues: issues,
   };
   const references = [

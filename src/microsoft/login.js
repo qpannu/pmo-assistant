@@ -14,10 +14,10 @@ if (!config.ms.tenantId || !config.ms.clientId) {
   process.exit(1);
 }
 
-const scopes = msScopes(config.ms);
+const scopes = msScopes(config.ms, config.teamsChat);
 const auth = createMsAuth({ ...config.ms, scopes });
 
-console.log(`\nRequesting read-only permissions: ${scopes.join(', ')}\n`);
+console.log(`\nRequesting permissions: ${scopes.join(', ')}${scopes.includes('ChatMessage.Send') ? '\n(ChatMessage.Send is only used to reply in TEAMS_CHAT_ID)' : ' (all read-only)'}\n`);
 try {
   await auth.deviceCodeLogin({ onPrompt: (message) => console.log(`${message}\n\nWaiting for you to finish signing in…`) });
   const me = await createGraphClient(auth).me();

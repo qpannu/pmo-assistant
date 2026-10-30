@@ -16,7 +16,7 @@ const skip = !config.ms.tenantId || !config.ms.clientId ? 'MS_TENANT_ID / MS_CLI
     : !config.ms.outlookEnabled ? 'MS_OUTLOOK_ENABLED=false' : false;
 
 test('reads my profile and a small sample of Outlook mail', { skip, timeout: 60_000 }, async (t) => {
-  const graph = createGraphClient(createMsAuth({ ...config.ms, scopes: msScopes(config.ms) }));
+  const graph = createGraphClient(createMsAuth({ ...config.ms, scopes: msScopes(config.ms, config.teamsChat) }));
   const me = await graph.me();
   assert.ok(me.id);
   t.diagnostic(`signed in as ${me.displayName}`);

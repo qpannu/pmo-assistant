@@ -126,6 +126,7 @@ export function releaseRisk(version, issues, rules, today) {
     openIssues: open.length,
     blockedIssues: keysArr(blocked),
     productionBlockers: keysArr(prodBlockers),
+    issueKeys: keysArr(open), // open scope, to detect scope changes between briefings
     highPriorityOpen: highPriority.length,
   };
 }

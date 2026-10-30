@@ -24,6 +24,22 @@ function list(name, fallback = []) {
   return Object.freeze(raw.split(',').map((s) => s.trim()).filter(Boolean));
 }
 
+// Default ezCater scope: open work under the ezCater epics (verified in Jira).
+const DEFAULT_SCOPES = {
+  ezCater: 'parentEpic in (214734, 214736, 214738, 214740, 228301, 229224, 236241, 245356, 256765) AND issuetype != Epic AND statusCategory != Done',
+};
+
+function parseScopes(raw) {
+  if (!raw) return Object.freeze({ ...DEFAULT_SCOPES });
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+    return Object.freeze(parsed);
+  } catch (err) {
+    throw new Error(`PMO_SCOPES must be JSON like {"ezCater":"<JQL>"} (${err.message})`);
+  }
+}
+
 export function loadConfig() {
   return Object.freeze({
     port: int('PORT', 3100, { min: 1, max: 65535 }),
@@ -45,13 +61,30 @@ export function loadConfig() {
 
     // Notifications to you in Teams via a Teams Workflow webhook (secret URL).
     teamsWebhookUrl: str('TEAMS_WEBHOOK_URL'),
+    // Wall-clock times in BRIEFING_TIMEZONE; leave a time empty to turn that briefing off.
     briefingTimes: Object.freeze({
-      morning: str('BRIEFING_MORNING', '08:00'),
-      midday: str('BRIEFING_MIDDAY', '12:30'),
-      eod: str('BRIEFING_EOD', '17:30'),
+      morning: str('BRIEFING_MORNING', '07:00'),
+      midday: process.env.BRIEFING_MIDDAY === '' ? '' : str('BRIEFING_MIDDAY', '12:30'),
+      eod: process.env.BRIEFING_EOD === '' ? '' : str('BRIEFING_EOD', '17:30'),
     }),
+    briefingTimeZone: str('BRIEFING_TIMEZONE', 'America/New_York'),
     // Days of week (0 = Sunday): weekdays by default.
     briefingDays: Object.freeze(list('BRIEFING_DAYS', ['1', '2', '3', '4', '5']).map(Number)),
+    // If the machine was off/asleep at the scheduled time, still send within this many minutes.
+    briefingGraceMinutes: int('BRIEFING_GRACE_MINUTES', 240, { min: 0, max: 720 }),
+
+    // Named Jira scopes the briefing and chat can report on, as JSON: {"ezCater": "<JQL>", ...}.
+    pmoScopes: parseScopes(str('PMO_SCOPES')),
+    myManager: Object.freeze({ name: str('MY_MANAGER_NAME'), email: str('MY_MANAGER_EMAIL') }),
+
+    // Two-way Teams chat: the chat the assistant listens to, and how it replies.
+    teamsChat: Object.freeze({
+      chatId: str('TEAMS_CHAT_ID'),
+      // 'webhook' = reply through TEAMS_WEBHOOK_URL (use with the Workflows bot chat; no extra permission)
+      // 'graph'   = post in the chat as you, prefixed with 🤖 (needs ChatMessage.Send)
+      replyMode: str('TEAMS_CHAT_REPLY_MODE', 'webhook'),
+      pollSeconds: int('TEAMS_CHAT_POLL_SECONDS', 20, { min: 5, max: 600 }),
+    }),
 
     jira: Object.freeze({
       baseUrl: str('JIRA_BASE_URL').replace(/\/+$/, ''),
@@ -86,6 +119,8 @@ export function loadConfig() {
       tokenCachePath: str('MS_TOKEN_CACHE_PATH', './data/.ms-token.json'),
       outlookEnabled: str('MS_OUTLOOK_ENABLED', 'true') === 'true',
       teamsEnabled: str('MS_TEAMS_ENABLED', 'true') === 'true',
+      // Today's meetings for the morning briefing (Calendars.Read).
+      calendarEnabled: str('MS_CALENDAR_ENABLED', 'true') === 'true',
       // First sync looks back this far; later syncs are incremental.
       mailLookbackDays: int('MS_MAIL_LOOKBACK_DAYS', 14, { min: 1, max: 90 }),
       teamsLookbackDays: int('MS_TEAMS_LOOKBACK_DAYS', 7, { min: 1, max: 60 }),
@@ -125,13 +160,13 @@ export function integrationStatus(config) {
 }
 
 // Delegated Graph permissions, limited to what the enabled features need.
-export function msScopes(ms) {
+export function msScopes(ms, teamsChat = {}) {
   const scopes = ['offline_access', 'User.Read'];
   if (ms.outlookEnabled) scopes.push('Mail.Read');
-  if (ms.teamsEnabled) {
-    scopes.push('Chat.Read');
-    if (ms.teamsChannels.length) scopes.push('Team.ReadBasic.All', 'Channel.ReadBasic.All', 'ChannelMessage.Read.All');
-  }
+  if (ms.calendarEnabled) scopes.push('Calendars.Read');
+  if (ms.teamsEnabled || teamsChat.chatId) scopes.push('Chat.Read');
+  if (ms.teamsEnabled && ms.teamsChannels.length) scopes.push('Team.ReadBasic.All', 'Channel.ReadBasic.All', 'ChannelMessage.Read.All');
+  if (teamsChat.chatId && teamsChat.replyMode === 'graph') scopes.push('ChatMessage.Send');
   return scopes;
 }
 

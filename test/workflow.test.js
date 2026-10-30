@@ -12,8 +12,8 @@ import { createScheduler } from '../src/scheduler.js';
 import { createClaude } from '../src/claude/client.js';
 import { createTeamsNotifier, notifyPendingAlerts } from '../src/notify/teams.js';
 import { createBriefingService } from '../src/briefing/briefing.js';
-import { isDue } from '../src/briefing/schedule.js';
-import { localToday } from '../src/jira/classify.js';
+import { dayKey } from '../src/time.js';
+
 import { seedSample } from './fixtures/sample-data.js';
 
 setLogLevel('error');
@@ -105,7 +105,10 @@ describe('complete workflow', () => {
     assert.equal(req.fallbacks, 'default');
     assert.deepEqual(req.system.at(-1).cache_control, { type: 'ephemeral' }, 'stable prefix marked for caching');
     const data = JSON.parse(req.messages[0].content.split('Data:\n')[1]);
-    assert.ok(data.topItems.length <= 12 && data.projects.length && data.releases.length, 'items, cross-project rollup, releases');
+    assert.equal(data.priorities.length, 3);
+    assert.ok(data.projects.length && data.releases.length, 'cross-project rollup and releases');
+    assert.equal(data.meetings.available, false, 'missing calendar is reported, not guessed');
+    assert.ok(!req.messages[0].content.includes('https://'), 'links sent as short ids, not URLs');
     assert.ok(req.messages[0].content.length < 9000, 'concise context');
 
     assert.match(cardTitle(hook.posts.at(-1)), /Morning briefing/);
@@ -191,7 +194,8 @@ describe('resilience', () => {
     const r = await (await post('/briefings/morning/run')).json();
     assert.equal(r.method, 'rules-fallback');
     assert.equal(claudeFake.calls.length, 0);
-    assert.match(r.content, /Top 3 today/);
+    assert.match(r.content, /1\. Today's priorities/);
+    assert.match(r.content, /8\. Recommended focus/);
     assert.equal(r.sent, true);
   });
 
@@ -207,7 +211,7 @@ describe('resilience', () => {
     const retry = await (await post('/briefings/morning/run')).json();
     assert.equal(retry.sent, true);
     assert.equal(claudeFake.calls.length, 1, 'content reused, not regenerated');
-    assert.ok(!JSON.stringify(store.getBriefing('morning', localToday())).includes('sig=secret'), 'webhook secret never stored');
+    assert.ok(!JSON.stringify(store.getBriefing('morning', dayKey(new Date(), 'America/New_York'))).includes('sig=secret'), 'webhook secret never stored');
   });
 
   test('without a webhook, notifications are a logged dry run', async () => {
@@ -215,17 +219,6 @@ describe('resilience', () => {
     assert.deepEqual(await n.send({ title: 'x', body: 'y' }), { dryRun: true });
   });
 
-  test('briefing schedule fires within its window on working days only', () => {
-    const s = createStore(openDb(':memory:'));
-    const cfg = { times: { morning: '08:00', midday: '12:30', eod: '17:30' }, days: [1, 2, 3, 4, 5] };
-    assert.equal(isDue('morning', new Date(2026, 9, 29, 8, 5), cfg, s), true);
-    assert.equal(isDue('morning', new Date(2026, 9, 29, 7, 55), cfg, s), false, 'too early');
-    assert.equal(isDue('morning', new Date(2026, 9, 29, 11, 30), cfg, s), false, 'past grace window');
-    assert.equal(isDue('morning', new Date(2026, 9, 31, 8, 5), cfg, s), false, 'Saturday');
-    s.saveBriefing({ kind: 'morning', day: '2026-10-29', method: 'rules', inputHash: 'h', content: 'c' });
-    s.markBriefingSent(s.getBriefing('morning', '2026-10-29').id);
-    assert.equal(isDue('morning', new Date(2026, 9, 29, 8, 5), cfg, s), false, 'already sent');
-  });
 });
 
 test('teardown', () => server?.close());

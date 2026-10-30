@@ -73,6 +73,7 @@ export function createMsAuth({ tenantId, clientId, tokenCachePath, scopes }, { f
     if (!ok) {
       // invalid_grant = revoked, expired or consent changed: a new sign-in is needed.
       log.warn('token refresh failed', { error: body.error, description: body.error_description?.split('\n')[0] });
+      cached = null; // re-read the token file next time, so `npm run ms:login` recovers without a restart
       throw new AuthRequiredError(`Microsoft sign-in expired (${body.error ?? 'refresh failed'}): run \`npm run ms:login\``);
     }
     store(body);
@@ -83,6 +84,7 @@ export function createMsAuth({ tenantId, clientId, tokenCachePath, scopes }, { f
     grantedScopes: () => cached?.scope ?? '',
 
     async getAccessToken({ forceRefresh = false } = {}) {
+      cached ??= load();
       if (!cached) throw new AuthRequiredError();
       if (forceRefresh || Date.now() > cached.expiresAt - EXPIRY_SKEW_MS) {
         refreshing ??= refresh().finally(() => { refreshing = null; });

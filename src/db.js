@@ -171,6 +171,21 @@ const MIGRATIONS = [
   );
   CREATE INDEX llm_calls_created ON llm_calls (created_at);
   `,
+
+  // 5 — briefing snapshots (to skip unchanged items) and Teams chat history
+  `
+  ALTER TABLE briefings ADD COLUMN snapshot TEXT;   -- JSON: item ids/scores, release scopes
+
+  CREATE TABLE chat_turns (
+    id          INTEGER PRIMARY KEY,
+    chat_id     TEXT NOT NULL,
+    message_id  TEXT,
+    role        TEXT NOT NULL CHECK (role IN ('user','assistant')),
+    text        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+  );
+  CREATE INDEX chat_turns_chat ON chat_turns (chat_id, created_at);
+  `,
 ];
 
 export function openDb(path) {

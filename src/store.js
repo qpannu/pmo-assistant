@@ -56,6 +56,23 @@ export function createStore(db) {
     return r.changes === 1;
   }
 
+  // Undo a claim so the work can be retried (e.g. a send that failed).
+  function releaseEvent(source, eventId) {
+    stmt(`DELETE FROM processed_events WHERE source = ? AND event_id = ?`).run(source, String(eventId));
+  }
+
+  // ─── Teams chat history (context for follow-up questions) ──────────────────
+  function addChatTurn({ chatId, messageId = null, role, text }) {
+    stmt(`INSERT INTO chat_turns (chat_id, message_id, role, text, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(chatId, messageId, role, String(text).slice(0, 4000), now());
+  }
+
+  function recentChatTurns(chatId, { sinceMinutes = 120, limit = 8 } = {}) {
+    const since = new Date(Date.now() - sinceMinutes * 60_000).toISOString();
+    return stmt(`SELECT role, text, created_at FROM chat_turns WHERE chat_id = ? AND created_at >= ?
+      ORDER BY id DESC LIMIT ?`).all(chatId, since, limit).reverse();
+  }
+
   function pruneProcessedEvents(olderThanDays = 30) {
     const cutoff = new Date(Date.now() - olderThanDays * 86_400_000).toISOString();
     return stmt(`DELETE FROM processed_events WHERE received_at < ?`).run(cutoff).changes;
@@ -268,17 +285,25 @@ export function createStore(db) {
   }
 
   // Creates the day's briefing, or replaces its content if it was never sent.
-  function saveBriefing({ kind, day, method, inputHash, content }) {
+  function saveBriefing({ kind, day, method, inputHash, content, snapshot = null }) {
     const existing = getBriefing(kind, day);
     if (existing?.sent_at) return existing;
+    const snap = snapshot ? JSON.stringify(snapshot) : null;
     if (existing) {
-      stmt(`UPDATE briefings SET method = ?, input_hash = ?, content = ?, created_at = ?, send_error = NULL WHERE id = ?`)
-        .run(method, inputHash, content, now(), existing.id);
+      stmt(`UPDATE briefings SET method = ?, input_hash = ?, content = ?, snapshot = ?, created_at = ?, send_error = NULL WHERE id = ?`)
+        .run(method, inputHash, content, snap, now(), existing.id);
     } else {
-      stmt(`INSERT INTO briefings (kind, day, method, input_hash, content, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(kind, day, method, inputHash, content, now());
+      stmt(`INSERT INTO briefings (kind, day, method, input_hash, content, snapshot, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(kind, day, method, inputHash, content, snap, now());
     }
     return getBriefing(kind, day);
+  }
+
+  // Snapshot of the last delivered briefing of a kind (for "what changed").
+  function lastBriefingSnapshot(kind) {
+    const row = stmt(`SELECT snapshot FROM briefings WHERE kind = ? AND sent_at IS NOT NULL AND snapshot IS NOT NULL
+      ORDER BY sent_at DESC LIMIT 1`).get(kind);
+    return row ? JSON.parse(row.snapshot) : null;
   }
 
   function markBriefingSent(id) {
@@ -384,6 +409,7 @@ export function createStore(db) {
     countActionSources, saveActionRanking,
     raiseAlert, acknowledgeAlert, listActiveAlerts, alertsToNotify, markAlertNotified, markAlertNotifyFailed,
     getBriefing, latestBriefingOn, lastSentBriefing, saveBriefing, markBriefingSent, markBriefingFailed, listBriefings,
+    lastBriefingSnapshot, releaseEvent, addChatTurn, recentChatTurns,
     recordLlmCall, llmUsageSince, actionEventsSince,
     createDraft, getDraft, listDrafts, editDraft, approveDraft, rejectDraft,
     claimDraftForSend, markDraftSent, markDraftFailed,

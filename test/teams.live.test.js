@@ -17,7 +17,7 @@ const skip = !config.ms.tenantId || !config.ms.clientId ? 'MS_TENANT_ID / MS_CLI
     : !config.ms.teamsEnabled ? 'MS_TEAMS_ENABLED=false' : false;
 
 test('reads recent chats and a small sample of messages', { skip, timeout: 60_000 }, async (t) => {
-  const graph = createGraphClient(createMsAuth({ ...config.ms, scopes: msScopes(config.ms) }));
+  const graph = createGraphClient(createMsAuth({ ...config.ms, scopes: msScopes(config.ms, config.teamsChat) }));
   const me = myIdentity(await graph.me());
 
   const chats = await graph.get('/me/chats', {
@@ -39,7 +39,7 @@ test('reads recent chats and a small sample of messages', { skip, timeout: 60_00
 });
 
 test('configured channels are reachable', { skip: skip || (!config.ms.teamsChannels.length && 'MS_TEAMS_CHANNELS not set'), timeout: 60_000 }, async (t) => {
-  const graph = createGraphClient(createMsAuth({ ...config.ms, scopes: msScopes(config.ms) }));
+  const graph = createGraphClient(createMsAuth({ ...config.ms, scopes: msScopes(config.ms, config.teamsChat) }));
   const teams = await graph.get('/me/joinedTeams', { query: { $select: 'id,displayName' } });
   for (const full of config.ms.teamsChannels) {
     const [teamName, channelName] = full.split('/').map((s) => s.trim());

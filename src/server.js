@@ -19,8 +19,13 @@ import { createTeamsNotifier, notifyPendingAlerts } from './notify/teams.js';
 import { createBriefingService } from './briefing/briefing.js';
 import { startBriefingSchedule } from './briefing/schedule.js';
 import { checkAndAlert } from './monitor.js';
+import { createChatHandler } from './chat/handler.js';
+import { createChatListener } from './chat/listener.js';
+import { createChatSender } from './microsoft/chatSend.js';
+import { assertTimeZone } from './time.js';
 
 setLogLevel(config.logLevel);
+assertTimeZone(config.briefingTimeZone);
 
 const db = openDb(config.dbPath);
 logger.info('db opened', { path: config.dbPath });
@@ -43,7 +48,6 @@ const reasoner = config.priorityUseClaude && claude.enabled ? createClaudeReason
 
 const notifier = createTeamsNotifier({ webhookUrl: config.teamsWebhookUrl });
 if (!notifier.configured) logger.warn('TEAMS_WEBHOOK_URL not set: briefings and alerts are logged, not sent (dry run)');
-const briefings = createBriefingService({ store, claude, notifier });
 
 // Every sync is followed by turning changed items into action items,
 // re-ranking, and delivering any new urgent alerts (each only once).
@@ -64,9 +68,10 @@ function readPmoContext(path) {
   }
 }
 
+let jiraClient = null;
 if (integrations.jira) {
-  const client = createJiraClient(config.jira);
-  scheduler.every('jira', config.syncMinutes.jira, thenActions(() => syncJira({ client, store, jira: config.jira })));
+  jiraClient = createJiraClient(config.jira);
+  scheduler.every('jira', config.syncMinutes.jira, thenActions(() => syncJira({ client: jiraClient, store, jira: config.jira })));
   if (!config.jira.projects.length) {
     logger.warn('JIRA_PROJECTS is empty: production bugs and releases are not tracked, only issues involving you');
   }
@@ -74,12 +79,14 @@ if (integrations.jira) {
   logger.info('jira not configured; skipping (set JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN)');
 }
 
+let graph = null;
+let msAuth = null;
 if (integrations.microsoft) {
-  const auth = createMsAuth({ ...config.ms, scopes: msScopes(config.ms) });
-  if (!auth.hasToken()) {
+  msAuth = createMsAuth({ ...config.ms, scopes: msScopes(config.ms, config.teamsChat) });
+  if (!msAuth.hasToken()) {
     logger.warn('microsoft not signed in; run `npm run ms:login`, then restart');
   } else {
-    const graph = createGraphClient(auth);
+    graph = createGraphClient(msAuth);
     if (config.ms.outlookEnabled) {
       scheduler.every('outlook', config.syncMinutes.outlook, thenActions(() => syncOutlook({ graph, store, ms: config.ms })), { initialDelayMs: 8_000 });
     }
@@ -88,14 +95,53 @@ if (integrations.microsoft) {
     }
   }
 } else {
-  logger.info('microsoft not configured; skipping Outlook and Teams (set MS_TENANT_ID, MS_CLIENT_ID)');
+  logger.info('microsoft not configured; skipping Outlook, Teams, calendar and Teams chat (set MS_TENANT_ID, MS_CLIENT_ID)');
+}
+
+const briefings = createBriefingService({
+  store, claude, notifier,
+  timeZone: config.briefingTimeZone,
+  live: {
+    jiraClient, graph, scopes: config.pmoScopes,
+    jiraEnabled: Boolean(jiraClient),
+    outlookEnabled: Boolean(graph && config.ms.outlookEnabled),
+    teamsEnabled: Boolean(graph && config.ms.teamsEnabled),
+    calendarEnabled: Boolean(graph && config.ms.calendarEnabled),
+  },
+});
+
+// Two-way Teams chat: listen to one chat, answer your messages in it.
+let chatListener = null;
+if (config.teamsChat.chatId) {
+  if (!graph) {
+    logger.warn('TEAMS_CHAT_ID is set but Microsoft is not signed in; Teams chat is off until `npm run ms:login` and a restart');
+  } else {
+    const handler = createChatHandler({ store, claude, config, jiraClient, scheduler });
+    const reply = config.teamsChat.replyMode === 'graph'
+      ? createChatSender(msAuth, config.teamsChat.chatId)
+      : (text) => notifier.send({ title: '🤖 PMO Assistant', body: text }).then((r) => {
+        if (r.dryRun) throw new Error('TEAMS_WEBHOOK_URL is required for webhook reply mode');
+        return r;
+      });
+    chatListener = createChatListener({
+      graph, store, handler, reply,
+      chatId: config.teamsChat.chatId,
+      pollSeconds: config.teamsChat.pollSeconds,
+      timeZone: config.briefingTimeZone,
+      notifyAlert: () => notifyPendingAlerts(store, notifier),
+    });
+    chatListener.start();
+  }
 }
 
 // Items stored before action derivation existed (or changed while offline).
 syncActions(store);
 
-// Briefings at their local times; monitoring every 15 minutes.
-const briefingSchedule = startBriefingSchedule({ store, briefings, times: config.briefingTimes, days: config.briefingDays });
+// Briefings at their wall-clock times in BRIEFING_TIMEZONE; monitoring every 15 minutes.
+const briefingSchedule = startBriefingSchedule({
+  store, briefings, times: config.briefingTimes, days: config.briefingDays,
+  timeZone: config.briefingTimeZone, graceMinutes: config.briefingGraceMinutes,
+});
 const monitorTimer = setInterval(() => {
   checkAndAlert({ store, config, scheduler, notifier, claude })
     .catch((err) => logger.error('monitor check failed', { error: err.message }));
@@ -130,6 +176,7 @@ function shutdown(signal) {
   logger.info('shutting down', { signal });
   scheduler.stop();
   briefingSchedule.stop();
+  chatListener?.stop();
   clearInterval(monitorTimer);
   server.close(() => {
     db.close();

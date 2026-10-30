@@ -339,3 +339,70 @@ Before relying on it daily:
 | Briefing text is plain lists | Claude is off, over `CLAUDE_DAILY_CALL_LIMIT`, or failed — see `briefingsToday[].method` |
 | `jira sync failed … 401` | Regenerate `JIRA_API_TOKEN` |
 | Outlook/Teams "sign-in required" | `npm run ms:login`, then restart |
+
+## 7:00 AM briefing and two-way Teams chat
+
+### What you get
+
+- **Weekday briefing at 7:00 AM America/New_York** (daylight saving handled), in your personal
+  Teams chat: today's priorities, meetings, pending on you, production issues, releases (with
+  scope changes), ezCater, overdue items and a recommended focus. Every section either has
+  verified data with links or says what's missing. Unchanged low-priority items aren't repeated.
+- **Chat with the assistant in Teams.** Ask anything ("What should I focus on today?", "What is
+  blocking the next POS release?", "Summarize the latest ezCater progress", "Draft a response to
+  my manager about the release date"). It syncs Jira first if data is older than 10 minutes,
+  remembers the last few exchanges for follow-ups, and returns drafts for review —
+  `approve draft 7` gives you send links; it never sends anything for you.
+
+### How it works (and why no extra infrastructure)
+
+| Piece | Mechanism | Needs |
+|---|---|---|
+| Briefing delivery | Teams Workflow webhook → your private chat with the Workflows bot | `TEAMS_WEBHOOK_URL` |
+| Meetings section | Graph `GET /me/calendarView` | Entra app + **Calendars.Read** |
+| Receiving your chat messages | Graph polls one chat every 20 s (`GET /chats/{id}/messages`) | Entra app + **Chat.Read** |
+| Replies (default) | Same Workflow webhook → same Workflows chat | nothing extra |
+| Replies (alternative) | Graph `POST /chats/{id}/messages`, only to `TEAMS_CHAT_ID` | **ChatMessage.Send** |
+
+Graph access alone does not let a service *receive* Teams messages: Microsoft's push options
+(bots, change notifications) need a public HTTPS endpoint and an Azure Bot registration. Polling
+one chat with delegated `Chat.Read` avoids both, runs on your Mac, and costs nothing.
+
+### Setup
+
+1. **Teams webhook** (no IT needed): Teams → Workflows → "Send webhook alerts to a chat" →
+   post as Flow bot in your chat with Flow bot → copy the URL into `TEAMS_WEBHOOK_URL`.
+2. **Entra app (IT):** add delegated **Calendars.Read** to the permissions listed above
+   (User.Read, offline_access, Mail.Read, Chat.Read). Add **ChatMessage.Send** only if you want
+   reply mode `graph`. Put `MS_TENANT_ID` / `MS_CLIENT_ID` in `.env`, then `npm run ms:login`.
+3. **Pick the chat:** type `hello` in your Workflows bot chat, then
+   `npm run chat:setup` (lists chats) and `npm run chat:setup -- <chatId>` (confirms your
+   message is visible). Set `TEAMS_CHAT_ID`.
+   If Teams doesn't let you type in the Workflows chat, use your "notes to self" chat (or any
+   chat only you use) with `TEAMS_CHAT_REPLY_MODE=graph`.
+4. Optional: `MY_MANAGER_NAME`/`MY_MANAGER_EMAIL`, extra `PMO_SCOPES` (e.g. Team Tesla JQL).
+5. **Run it in the background:** stop any `npm start` terminal, then `npm run service:install`.
+   It starts at login, restarts on crash, logs to `logs/`, and runs without Claude Code.
+   After editing `.env`: `npm run service:restart`.
+
+### Test
+
+```bash
+npm test                                   # includes DST, duplicates, chat, recovery tests
+curl -X POST -H 'Content-Type: application/json' -d '{"force":true}' http://127.0.0.1:3100/briefings/morning/run
+```
+Then send "What should I focus on today?" in the chat and expect a reply within ~20 seconds.
+
+### Reliability
+
+- **No duplicate briefings:** each day's briefing is claimed in the database before sending, so
+  restarts or two running copies can't both send it.
+- **Missed runs:** if the Mac was asleep at 7:00, the briefing goes out when it wakes, up to
+  `BRIEFING_GRACE_MINUTES` (4 h) late; after that it's logged as missed. To be safe, let the Mac
+  wake itself (System Settings → Battery/Energy → schedule) or keep it on power.
+- **Failures:** a failed delivery is retried with the same text; chat replies are retried on the
+  next poll (3 attempts); expired Microsoft sign-in pauses chat with one Teams alert per day and
+  resumes automatically after `npm run ms:login`.
+- **Cost control:** one Claude call per briefing and per chat question (drafts: one), within
+  `CLAUDE_DAILY_CALL_LIMIT`; URLs are sent to Claude as short ids; without Claude everything falls
+  back to rule-based text.
