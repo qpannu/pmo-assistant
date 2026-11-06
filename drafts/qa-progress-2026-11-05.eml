@@ -1,0 +1,88 @@
+From: Qaiser Pannu <qpannu@madmobile.com>
+To: Qaiser Pannu <qpannu@madmobile.com>
+Subject: QA Progress Report - Thu Nov 5, 2026
+X-Unsent: 1
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+<html><body style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#222">
+<h2 style="margin-bottom:2px">QA Progress Report: Thu Nov 5, 2026</h2>
+<p style="color:#666;margin-top:0">Source: Jira (madmobile-eng), as of Nov 5. Signoff is status-based (Review or Accepted). Anything Jira can't show is marked "QA to confirm".</p>
+
+<h3>🚨 Needs attention</h3>
+<ol>
+<li><b>Tips Hardening has not reached QA.</b> 0 of 29 tickets are in QA: 15 in Code Review, 7 Ready for Development, 4 in Dev in Progress. The MPOS_1.21.x fix version is unreleased with a 2025-09-30 release date, likely stale. (REST-17306)</li>
+<li><b>Tip Reporting/BBBA has a stalled QA backlog.</b> 6 tickets sit in Ready for QA. REST-19388 has waited 126 days and REST-19394 57 days; REST-19394 also blocks production problem REST-21234. Only REST-19391 is actively being tested.</li>
+<li><b>REST-19185 is in QA while a blocker hasn't started dev.</b> Its blocker REST-20179 is Ready for Development, so the testing may not be valid yet. (Tax Exempt)</li>
+</ol>
+
+<h3>1. Overall QA health</h3>
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse">
+<tr style="background:#eee"><th>Workstream</th><th>QA owner</th><th>Health</th><th>Read</th></tr>
+<tr><td>ezCater</td><td>Brew</td><td>🟡</td><td>27 open: Dev 17 (2 Critical), QA 10. Nothing blocked.</td></tr>
+<tr><td>Tips Hardening</td><td>Kaelon</td><td>🔴</td><td>Dev not finished. QA hasn't started.</td></tr>
+<tr><td>Tip Reporting/BBBA</td><td>Darren</td><td>🟡</td><td>Dev nearly done. QA backlog stalled.</td></tr>
+<tr><td>Delivery Tax Exempt</td><td>Darren</td><td>🟡</td><td>16 of 25 past QA. 2 in QA. 1 bug in Review.</td></tr>
+</table>
+<p style="color:#666">Health is rated from the data; thresholds are open to adjust.</p>
+
+<h3>2. POS features</h3>
+<p><b>Tips Hardening (REST-17306), 29 tickets</b></p>
+<ul>
+<li><b>Dev:</b> 1 of 29 complete (a Spike, Accepted).</li>
+<li><b>QA:</b> 0 in QA, 0 signed off.</li>
+<li><b>Open bugs:</b> REST-20353 (MadPay preAuthorization): Ready for QA about 15 days, failed QA twice (Sep 2, Sep 28). REST-21242 (Cake Pop version): Building. REST-20789 (Cake Pop split payment): On Hold 38 days.</li>
+<li><b>Dependencies:</b> REST-21214, 21215, 21216 wait on REST-21153 (Code Review).</li>
+<li><b>Next milestone:</b> unknown; no release date on the initiative.</li>
+</ul>
+<p><b>Tip Reporting/BBBA (REST-17969), 18 tickets</b></p>
+<ul>
+<li><b>Dev:</b> 16 of 18 complete. REST-21480 in progress, REST-21477 not started.</li>
+<li><b>QA:</b> 8 of 18 signed off (4 Review, 1 Accepted, 3 Closed). 1 being tested. 6 waiting in Ready for QA, plus REST-21481 reaching 3 days today.</li>
+<li><b>Open bugs:</b> none. Linked production problem REST-21234 is in Review, blocked by REST-19394.</li>
+<li><b>Risk:</b> Beau Bruderer is Assigned Developer on 17 of 18 tickets.</li>
+</ul>
+<p><b>Delivery Tax Exempt (REST-18147), 25 tickets</b></p>
+<ul>
+<li><b>Dev:</b> 18 of 25 complete. 7 not: 3 Ready for Development, 2 Code Review, 2 Product Planned.</li>
+<li><b>QA:</b> 16 of 25 signed off (8 Accepted, 6 Closed, 2 Review). 2 being tested.</li>
+<li><b>Open bug:</b> REST-21471, delivery tax rounding ($0.31 instead of $0.32), High, in Review.</li>
+<li><b>Linked blocker:</b> REST-19692 is blocked by REST-21328 (bug, in Review, not linked in Jira).</li>
+</ul>
+
+<h3>3. ezCater</h3>
+<p>27 open. Dev 17 (2 Critical, 9 High), QA 10, nothing blocked. Same as the war-room snapshot; full detail is in the 3 PM update.</p>
+
+<h3>4. QA ownership</h3>
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse">
+<tr style="background:#eee"><th>QA</th><th>Owns</th><th>Testing now</th><th>Waiting or stale</th></tr>
+<tr><td>Darren</td><td>Tip Reporting/BBBA, Tax Exempt</td><td>REST-19185 (since 9:37 AM)</td><td>REST-21481 Ready for QA since Nov 2</td></tr>
+<tr><td>Kaelon</td><td>Tips Hardening</td><td>REST-19391 (since Nov 4), REST-19692 (23 days)</td><td>5 BBBA tickets in Ready for QA for 57 to 126 days</td></tr>
+<tr><td>Brew</td><td>ezCater</td><td colspan="2">See the ezCater snapshot</td></tr>
+</table>
+<p style="color:#666">FYI: Jira's Assigned QA field also lists Sowjanya Akula (17 Tips Hardening tickets), Rekha Mohanan and Bill Fenley on some tickets. Not treated as ownership changes.</p>
+
+<h3>5. Failed QA (confirmed from the change log)</h3>
+<ul>
+<li>REST-20353 failed twice (Rekha Mohanan).</li>
+<li>REST-19394 failed once (Kaelon, Sep 8), then redelivered.</li>
+<li>REST-20789 failed once (Sowjanya, Sep 11).</li>
+<li>Developer pull-backs and moves out of On Hold are not counted as failures. Retest results are not documented in Jira: QA to confirm.</li>
+</ul>
+
+<h3>6. Release alignment (open and closed leaf tickets by fix version)</h3>
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse">
+<tr style="background:#eee"><th>Feature</th><th>POS 7.46</th><th>Cloud (CCL_8.886.50.0)</th><th>Cake Pop (MPOS_1.21.x)</th><th>No fix version</th></tr>
+<tr><td>Tips Hardening</td><td>16</td><td>0</td><td>12 (unreleased)</td><td>1</td></tr>
+<tr><td>Tip Reporting/BBBA</td><td>3</td><td>10</td><td>2</td><td>3</td></tr>
+<tr><td>Delivery Tax Exempt</td><td>10</td><td>13</td><td>2</td><td>0</td></tr>
+</table>
+
+<h3>Not determinable from Jira (QA to confirm)</h3>
+<ul>
+<li>Test execution: pass/fail counts per scenario, and pending scenarios (only REST-19692 links a Confluence test-case page).</li>
+<li>Release dates for the POS and Cloud tracks.</li>
+<li>Time in status for REST-19389, 19390, 19395, 19396 (Jira "updated" dates are distorted by a bulk sprint edit on Oct 28).</li>
+</ul>
+</body></html>
