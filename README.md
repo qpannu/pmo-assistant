@@ -462,3 +462,4 @@ Then send "What should I focus on today?" in the chat and expect a reply within 
 - **Cost control:** one Claude call per briefing and per chat question (drafts: one), within
   `CLAUDE_DAILY_CALL_LIMIT`; URLs are sent to Claude as short ids; without Claude everything falls
   back to rule-based text.
+# pmo-assistant
