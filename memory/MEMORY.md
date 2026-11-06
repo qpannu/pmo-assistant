@@ -17,3 +17,4 @@ Corrections and preferences from Qaiser, one file each. Prefixes: `feedback_`, `
 - [ezCater war room exec summary](project_ezcater_war_room_exec_summary.md) — daily EOD executive-summary email format for Zubair (Nov 4-13), counting rules, standing Note
 - [POS 7.44 merged into 7.46](feedback_pos_744_merged_into_746.md) — never reference 7.44; fold into 7.46
 - [QA Progress report design](project_qa_progress_report.md) — agreed design, owners, signoff rule; sample sent Nov 5, not built
+- [Agent learning playbook](project_agent_learning_playbook.md) — how agents learn from findings and feedback; what adapts alone vs needs approval; seed lessons

@@ -58,3 +58,7 @@ On a FAIL, every point lost must map to a required fix, so the producer knows ex
 - Nothing from the PMO team goes to Qaiser as final, gets posted, or feeds another agent until it scores **≥ 95**.
 - On a FAIL, return the deliverable and your required fixes to the **same** agent. Re-gate the corrected version from scratch.
 - After **3 failed rounds**, stop. Hand Qaiser the best version clearly labelled **"Did not pass QA (score n/100)"**, with the outstanding fixes.
+
+## Learning
+- Read `/Users/qpannu/Documents/Claude/PMO Assistant/memory/project_agent_learning_playbook.md`. Check that lessons applied by the producer did not override a hard rule (format, scope, safety, thresholds without approval). Deduct under Safety if one did.
+- End every verdict with **Recurring fixes**: required-fix types you have now seen more than once, so the producer checks them up front next time.
